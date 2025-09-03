@@ -1,0 +1,30 @@
+[project]
+name = "mcp-knowair-weather"
+version = "0.1.0"
+description = "KnowAir Weather MCP Server"
+readme = "README.md"
+maintainers = [
+    { name = "shuowang", email = "shuowang.ai@gmail.com" },
+]
+authors = [
+    { name = "shuowang", email = "shuowang.ai@gmail.com" },
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.5.0",
+    "pydantic>=2.10.6",
+]
+license = { file = "LICENSE" }
+keywords = ["MCP", "Weather"]
+
+[project.urls]
+Homepage = "https://github.com/shuowang/Weather-MCP"
+Issues = "https://github.com/shuowang/Weather-MCP/issues"
+
+[project.scripts]
+mcp-knowair-weather = "mcp_knowair_weather:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
