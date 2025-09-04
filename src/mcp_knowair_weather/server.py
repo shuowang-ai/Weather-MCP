@@ -130,6 +130,8 @@ async def get_hourly_forecast(
                 temp = hourly["temperature"][i]["value"]
                 skycon = hourly["skycon"][i]["value"]
                 rain_prob = hourly["precipitation"][i]["probability"]
+                # Get precipitation intensity (mm/h)
+                precip_intensity = hourly["precipitation"][i].get("value", 0)
                 wind_speed = hourly["wind"][i]["speed"]
                 wind_dir = hourly["wind"][i]["direction"]
                 
@@ -143,6 +145,7 @@ Time: {time}
 Temperature: {temp}°C
 {apparent_temp}Weather: {skycon}
 Rain Probability: {rain_prob}%
+Precipitation: {precip_intensity}mm/h
 Wind: {wind_speed}m/s, {wind_dir}°
 ------------------------"""
             return forecast
