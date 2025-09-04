@@ -47,18 +47,77 @@ def translate_weather_phenomenon(skycon: str) -> str:
     """Translate weather phenomenon code to Chinese description."""
     return WEATHER_PHENOMENA.get(skycon, skycon)
 
-def format_precipitation_intensity(intensity: float) -> str:
-    """Format precipitation intensity with proper description."""
-    if intensity < 0.031:
-        return f"{intensity:.3f} (无雨/雪)"
-    elif intensity < 0.25:
-        return f"{intensity:.3f} (小雨/雪)"
-    elif intensity < 0.35:
-        return f"{intensity:.3f} (中雨/雪)"
-    elif intensity < 0.48:
-        return f"{intensity:.3f} (大雨/雪)"
+def format_precipitation_intensity(intensity: float, data_type: str = "radar") -> str:
+    """Format precipitation intensity with proper description based on data type."""
+    if data_type == "radar":
+        # 雷达降水强度 (0-1 范围)
+        if intensity < 0.031:
+            return f"{intensity:.3f} (无雨/雪)"
+        elif intensity < 0.25:
+            return f"{intensity:.3f} (小雨/雪)"
+        elif intensity < 0.35:
+            return f"{intensity:.3f} (中雨/雪)"
+        elif intensity < 0.48:
+            return f"{intensity:.3f} (大雨/雪)"
+        else:
+            return f"{intensity:.3f} (暴雨/雪)"
+    elif data_type == "hourly":
+        # 逐小时降水量 mm/h
+        if intensity < 0.0606:
+            return f"{intensity:.2f}mm/h (无雨/雪)"
+        elif intensity < 0.8989:
+            return f"{intensity:.2f}mm/h (小雨/雪)"
+        elif intensity < 2.87:
+            return f"{intensity:.2f}mm/h (中雨/雪)"
+        elif intensity < 12.8638:
+            return f"{intensity:.2f}mm/h (大雨/雪)"
+        else:
+            return f"{intensity:.2f}mm/h (暴雨/雪)"
+    elif data_type == "minutely":
+        # 分钟级降水量 mm/h
+        if intensity < 0.08:
+            return f"{intensity:.2f}mm/h (无雨/雪)"
+        elif intensity < 3.44:
+            return f"{intensity:.2f}mm/h (小雨/雪)"
+        elif intensity < 11.33:
+            return f"{intensity:.2f}mm/h (中雨/雪)"
+        elif intensity < 51.30:
+            return f"{intensity:.2f}mm/h (大雨/雪)"
+        else:
+            return f"{intensity:.2f}mm/h (暴雨/雪)"
     else:
-        return f"{intensity:.3f} (暴雨/雪)"
+        return f"{intensity:.3f}"
+
+def get_life_index_description(index_type: str, level: int) -> str:
+    """Get life index description in Chinese."""
+    descriptions = {
+        "ultraviolet": {
+            0: "无", 1: "很弱", 2: "很弱", 3: "弱", 4: "弱", 5: "中等",
+            6: "中等", 7: "强", 8: "强", 9: "强", 10: "很强", 11: "极强"
+        },
+        "ultraviolet_daily": {
+            1: "最弱", 2: "弱", 3: "中等", 4: "强", 5: "很强"
+        },
+        "dressing": {
+            0: "极热", 1: "极热", 2: "很热", 3: "热", 4: "温暖",
+            5: "凉爽", 6: "冷", 7: "寒冷", 8: "极冷"
+        },
+        "comfort": {
+            0: "闷热", 1: "酷热", 2: "很热", 3: "热", 4: "温暖",
+            5: "舒适", 6: "凉爽", 7: "冷", 8: "很冷", 9: "寒冷",
+            10: "极冷", 11: "刺骨的冷", 12: "湿冷", 13: "干冷"
+        },
+        "coldRisk": {
+            1: "少发", 2: "较易发", 3: "易发", 4: "极易发"
+        },
+        "carWashing": {
+            1: "适宜", 2: "较适宜", 3: "较不适宜", 4: "不适宜"
+        }
+    }
+    
+    if index_type in descriptions:
+        return descriptions[index_type].get(level, f"未知等级({level})")
+    return f"未知指数({index_type}: {level})"
 
 
 async def make_request(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -118,7 +177,7 @@ async def get_realtime_weather(
             
             # Format weather report
             weather_desc = translate_weather_phenomenon(rt["skycon"])
-            precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"])
+            precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"], "radar")
             
             report = f"""🌤️ 实时天气数据:
 📍 位置: {lng}, {lat}
@@ -131,7 +190,7 @@ async def get_realtime_weather(
 ☀️  辐射通量: {rt["dswrf"]}W/M²
 💨 风速: {rt["wind"]["speed"]}m/s, 风向: {rt["wind"]["direction"]}°
 📊 气压: {rt["pressure"]}Pa
-🌧️  降水强度: {precip_intensity}
+🌧️  降水强度: {precip_intensity} (雷达数据)
 📍 最近降水距离: {rt["precipitation"]["nearest"]["distance"]/1000:.1f}km
 
 🏭 空气质量:
@@ -144,9 +203,36 @@ async def get_realtime_weather(
     中国AQI: {rt["air_quality"]["aqi"]["chn"]} ({rt["air_quality"]["description"]["chn"]})
     美国AQI: {rt["air_quality"]["aqi"]["usa"]} ({rt["air_quality"]["description"]["usa"]})
 
-📋 生活指数:
-    紫外线: {rt["life_index"]["ultraviolet"]["desc"]} (指数: {rt["life_index"]["ultraviolet"]["index"]})
-    舒适度: {rt["life_index"]["comfort"]["desc"]} (指数: {rt["life_index"]["comfort"]["index"]})"""
+📋 生活指数:"""
+            
+            # Enhanced life index
+            if "life_index" in rt:
+                for key, name, emoji in [("ultraviolet", "紫外线", "☀️"), ("comfort", "舒适度", "🌡️")]:
+                    if key in rt["life_index"]:
+                        index_value = rt["life_index"][key]["index"]
+                        desc = rt["life_index"][key]["desc"]
+                        
+                        # 尝试用标准描述替代API描述
+                        if key == "ultraviolet":
+                            try:
+                                uv_level = int(float(index_value))
+                                standard_desc = get_life_index_description("ultraviolet", uv_level)
+                                if standard_desc != f"未知等级({uv_level})":
+                                    desc = standard_desc
+                            except:
+                                pass
+                        elif key == "comfort":
+                            try:
+                                comfort_level = int(index_value)
+                                standard_desc = get_life_index_description("comfort", comfort_level)
+                                if standard_desc != f"未知等级({comfort_level})":
+                                    desc = standard_desc
+                            except:
+                                pass
+                        
+                        report += f"\n    {emoji} {name}: {desc} (等级: {index_value})"
+            else:
+                report += "\n    暂无生活指数数据"
             
             return report
         
@@ -238,6 +324,7 @@ async def get_hourly_forecast(
                 # Precipitation data
                 rain_prob = int(hourly["precipitation"][i]["probability"] * 100)
                 precip_value = hourly["precipitation"][i].get("value", 0)
+                precip_desc = format_precipitation_intensity(precip_value, "hourly")
                 
                 # Wind data
                 wind_speed = hourly["wind"][i]["speed"]
@@ -313,7 +400,7 @@ async def get_hourly_forecast(
 🌡️  温度: {temp}°C
 {apparent_temp}🌦️  天气: {skycon}
 🌧️  降水概率: {rain_prob}%
-💧 降水量: {precip_value}mm/h
+💧 降水量: {precip_desc}
 💨 风速: {wind_speed}km/h, 风向: {wind_dir}°
 💧 湿度: {humidity}%
 ☁️  云量: {cloudrate}%
@@ -438,16 +525,34 @@ async def get_daily_forecast(
                         sunset = astro["sunset"]["time"] if isinstance(astro["sunset"], dict) else astro["sunset"]
                         sun_info = f"🌅 日出: {sunrise} | 🌇 日落: {sunset}\n"
                 
-                # Life index
+                # Life index with enhanced descriptions
                 life_info = ""
                 if "life_index" in daily:
-                    for key, name in [("ultraviolet", "紫外线"), ("carWashing", "洗车"), 
-                                     ("dressing", "穿衣"), ("comfort", "舒适度"), ("coldRisk", "感冒")]:
+                    life_items = []
+                    for key, name, emoji in [("ultraviolet", "紫外线", "☀️"), ("carWashing", "洗车", "🚗"), 
+                                           ("dressing", "穿衣", "👕"), ("comfort", "舒适度", "🌡️"), ("coldRisk", "感冒", "🤧")]:
                         if key in daily["life_index"] and i < len(daily["life_index"][key]):
-                            desc = daily["life_index"][key][i]["desc"]
-                            life_info += f"{name}: {desc} | "
-                    if life_info:
-                        life_info = f"📋 生活指数: {life_info.rstrip(' | ')}\n"
+                            data = daily["life_index"][key][i]
+                            desc = data["desc"]
+                            
+                            # Try to use standard descriptions
+                            if "index" in data:
+                                try:
+                                    level = int(data["index"])
+                                    if key == "ultraviolet":
+                                        standard_desc = get_life_index_description("ultraviolet_daily", level)
+                                    else:
+                                        standard_desc = get_life_index_description(key, level)
+                                    
+                                    if standard_desc != f"未知等级({level})" and standard_desc != f"未知指数({key}: {level})":
+                                        desc = standard_desc
+                                except:
+                                    pass
+                            
+                            life_items.append(f"{emoji}{name}:{desc}")
+                    
+                    if life_items:
+                        life_info = f"📋 生活指数: {' | '.join(life_items)}\n"
                 
                 forecast += f"""📅 {date}
 🌡️  温度: {temp_min}°C ~ {temp_max}°C (平均: {temp_avg}°C)
@@ -611,7 +716,7 @@ async def get_minutely_precipitation(
                 for i in range(0, min(60, len(precipitation_data)), 5):
                     time_offset = i
                     intensity = precipitation_data[i] if i < len(precipitation_data) else 0
-                    intensity_desc = format_precipitation_intensity(intensity)
+                    intensity_desc = format_precipitation_intensity(intensity, "minutely")
                     forecast += f"T+{time_offset:2d}分钟: {intensity_desc}\n"
             
             # Show 2-hour precipitation probability
