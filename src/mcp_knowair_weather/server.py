@@ -532,6 +532,12 @@ async def get_historical_weather(
                     if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
                         pm25 = hourly["air_quality"]["pm25"][i]["value"]
                         air_info += f"🏭 PM2.5: {pm25}μg/m³ | "
+                    if "pm10" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm10"]):
+                        pm10 = hourly["air_quality"]["pm10"][i]["value"]
+                        air_info += f"🌫️ PM10: {pm10}μg/m³ | "
+                    if "o3" in hourly["air_quality"] and i < len(hourly["air_quality"]["o3"]):
+                        o3 = hourly["air_quality"]["o3"][i]["value"]
+                        air_info += f"💨 O3: {o3}μg/m³ | "
                     if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
                         aqi = hourly["air_quality"]["aqi"][i]["value"]["chn"]
                         air_info += f"📊 AQI: {aqi} | "
