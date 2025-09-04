@@ -193,6 +193,40 @@ async def get_hourly_forecast(
             if keypoint:
                 forecast += f"🎯 关键信息: {keypoint}\n\n"
             
+            # Air quality trend analysis (if available)
+            air_quality_trend = ""
+            if "air_quality" in hourly and "aqi" in hourly["air_quality"]:
+                aqi_values = []
+                pm25_values = []
+                for data in hourly["air_quality"]["aqi"][:min(hours, len(hourly["air_quality"]["aqi"]))]:
+                    aqi_values.append(data["value"]["chn"])
+                if "pm25" in hourly["air_quality"]:
+                    for data in hourly["air_quality"]["pm25"][:min(hours, len(hourly["air_quality"]["pm25"]))]:
+                        pm25_values.append(data["value"])
+                
+                if len(aqi_values) >= 2:
+                    aqi_start = aqi_values[0]
+                    aqi_end = aqi_values[-1]
+                    aqi_change = aqi_end - aqi_start
+                    
+                    if aqi_change > 10:
+                        trend_desc = "📈 空气质量趋势：恶化"
+                    elif aqi_change < -10:
+                        trend_desc = "📉 空气质量趋势：改善"
+                    else:
+                        trend_desc = "➡️ 空气质量趋势：稳定"
+                    
+                    air_quality_trend = f"{trend_desc} (AQI: {aqi_start}→{aqi_end})\n"
+                    
+                    if pm25_values and len(pm25_values) >= 2:
+                        pm25_change = pm25_values[-1] - pm25_values[0]
+                        air_quality_trend += f"PM2.5变化: {pm25_values[0]}→{pm25_values[-1]}μg/m³\n"
+                    
+                    air_quality_trend += "\n"
+            
+            if air_quality_trend:
+                forecast += f"🏭 === 空气质量趋势 ===\n{air_quality_trend}"
+            
             # Show every 3 hours for better readability if more than 24 hours
             step = 3 if hours > 24 else 1
             
@@ -223,12 +257,57 @@ async def get_hourly_forecast(
                 # Air quality (if available)
                 air_quality_info = ""
                 if "air_quality" in hourly:
+                    # Helper functions for air quality levels
+                    def get_aqi_icon(aqi):
+                        if aqi <= 50: return "🟢"
+                        elif aqi <= 100: return "🟡"
+                        elif aqi <= 150: return "🟠"
+                        elif aqi <= 200: return "🔴"
+                        elif aqi <= 300: return "🟣"
+                        else: return "⚫"
+                    
+                    def get_pm25_icon(pm25):
+                        if pm25 <= 35: return "🟢"
+                        elif pm25 <= 75: return "🟡"
+                        elif pm25 <= 115: return "🟠"
+                        elif pm25 <= 150: return "🔴"
+                        elif pm25 <= 250: return "🟣"
+                        else: return "⚫"
+                    
+                    # AQI information
+                    if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
+                        aqi_data = hourly["air_quality"]["aqi"][i]["value"]
+                        chn_aqi = aqi_data["chn"]
+                        usa_aqi = aqi_data.get("usa", "N/A")
+                        aqi_icon = get_aqi_icon(chn_aqi)
+                        air_quality_info += f"{aqi_icon} AQI: {chn_aqi} (美标:{usa_aqi})\n"
+                    
+                    # PM2.5 information
                     if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
                         pm25 = hourly["air_quality"]["pm25"][i]["value"]
-                        air_quality_info += f"🏭 PM2.5: {pm25}μg/m³\n"
-                    if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
-                        chn_aqi = hourly["air_quality"]["aqi"][i]["value"]["chn"]
-                        air_quality_info += f"📊 AQI: {chn_aqi}\n"
+                        pm25_icon = get_pm25_icon(pm25)
+                        air_quality_info += f"{pm25_icon} PM2.5: {pm25}μg/m³\n"
+                    
+                    # Additional pollutants
+                    if "pm10" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm10"]):
+                        pm10 = hourly["air_quality"]["pm10"][i]["value"]
+                        air_quality_info += f"🌫️ PM10: {pm10}μg/m³\n"
+                    
+                    if "o3" in hourly["air_quality"] and i < len(hourly["air_quality"]["o3"]):
+                        o3 = hourly["air_quality"]["o3"][i]["value"]
+                        air_quality_info += f"💨 臭氧: {o3}μg/m³\n"
+                    
+                    if "no2" in hourly["air_quality"] and i < len(hourly["air_quality"]["no2"]):
+                        no2 = hourly["air_quality"]["no2"][i]["value"]
+                        air_quality_info += f"🌬️ NO2: {no2}μg/m³\n"
+                    
+                    if "so2" in hourly["air_quality"] and i < len(hourly["air_quality"]["so2"]):
+                        so2 = hourly["air_quality"]["so2"][i]["value"]
+                        air_quality_info += f"☁️ SO2: {so2}μg/m³\n"
+                    
+                    if "co" in hourly["air_quality"] and i < len(hourly["air_quality"]["co"]):
+                        co = hourly["air_quality"]["co"][i]["value"]
+                        air_quality_info += f"💨 CO: {co}mg/m³\n"
                 
                 forecast += f"""⏰ {time}
 🌡️  温度: {temp}°C
