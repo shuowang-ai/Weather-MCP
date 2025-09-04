@@ -719,6 +719,211 @@ API状态: {result.get("api_status", "未知")}
 
 
 @mcp.tool()
+async def get_air_quality_forecast(
+    lng: float = Field(
+        description="The longitude of the location (-180 to 180)",
+        ge=-180.0,
+        le=180.0
+    ),
+    lat: float = Field(
+        description="The latitude of the location (-90 to 90)",
+        ge=-90.0,
+        le=90.0
+    ),
+    days: int = Field(
+        description="Number of days to forecast air quality (1-7)",
+        ge=1,
+        le=7,
+        default=7
+    ),
+) -> str:
+    """Get comprehensive air quality forecast including PM2.5, PM10, AQI trends and health recommendations for the next 1-7 days."""
+    try:
+        token = validate_api_token()
+        logger.info(f"Getting air quality forecast for coordinates: {lng}, {lat} for {days} days")
+        
+        async with httpx.AsyncClient() as client:
+            # Get both current air quality and forecast
+            current_result = await make_request(
+                client,
+                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/realtime",
+                {"lang": "zh_CN"},
+            )
+            
+            forecast_result = await make_request(
+                client,
+                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/daily",
+                {"dailysteps": str(days), "lang": "zh_CN"},
+            )
+            
+            current_air = current_result["result"]["realtime"]["air_quality"]
+            daily = forecast_result["result"]["daily"]
+            
+            def get_aqi_level_description(aqi):
+                """Get AQI level description in Chinese"""
+                if aqi <= 50:
+                    return "优", "空气质量令人满意，基本无空气污染", "🟢"
+                elif aqi <= 100:
+                    return "良", "空气质量可接受，但某些污染物可能对极少数异常敏感人群健康有较弱影响", "🟡"
+                elif aqi <= 150:
+                    return "轻度污染", "易感人群症状有轻度加剧，健康人群出现刺激症状", "🟠"
+                elif aqi <= 200:
+                    return "中度污染", "进一步加剧易感人群症状，可能对健康人群心脏、呼吸系统有影响", "🔴"
+                elif aqi <= 300:
+                    return "重度污染", "心脏病和肺病患者症状显著加剧，运动耐受力降低，健康人群普遍出现症状", "🟣"
+                else:
+                    return "严重污染", "健康人群运动耐受力降低，有明显强烈症状，提前出现某些疾病", "⚫"
+            
+            def get_pm25_level(pm25):
+                """Get PM2.5 level description"""
+                if pm25 <= 35:
+                    return "优秀", "🟢"
+                elif pm25 <= 75:
+                    return "良好", "🟡"
+                elif pm25 <= 115:
+                    return "轻度污染", "🟠"
+                elif pm25 <= 150:
+                    return "中度污染", "🔴"
+                elif pm25 <= 250:
+                    return "重度污染", "🟣"
+                else:
+                    return "严重污染", "⚫"
+            
+            report = f"🏭 空气质量预报 (未来{days}天)\n📍 位置: {lng}, {lat}\n\n"
+            
+            # Current air quality
+            current_aqi = current_air["aqi"]["chn"]
+            current_pm25 = current_air["pm25"]
+            current_level, current_desc, current_icon = get_aqi_level_description(current_aqi)
+            pm25_level, pm25_icon = get_pm25_level(current_pm25)
+            
+            report += f"""🔄 当前空气质量 (实时):
+{current_icon} AQI: {current_aqi} ({current_level})
+{pm25_icon} PM2.5: {current_pm25}μg/m³ ({pm25_level})
+📊 完整数据:
+    PM10: {current_air["pm10"]}μg/m³
+    臭氧: {current_air["o3"]}μg/m³  
+    二氧化硫: {current_air["so2"]}μg/m³
+    二氧化氮: {current_air["no2"]}μg/m³
+    一氧化碳: {current_air["co"]}mg/m³
+💡 健康建议: {current_desc}
+
+"""
+            
+            # Daily air quality forecast
+            if "air_quality" in daily:
+                report += "📅 === 未来空气质量预报 ===\n\n"
+                
+                # Track trends
+                aqi_trend = []
+                pm25_trend = []
+                
+                for i in range(min(days, len(daily["air_quality"]["aqi"]))):
+                    date = daily["air_quality"]["aqi"][i]["date"].split("T")[0]
+                    
+                    # AQI data
+                    aqi_data = daily["air_quality"]["aqi"][i]
+                    aqi_avg = aqi_data["avg"]["chn"]
+                    aqi_max = aqi_data["max"]["chn"] 
+                    aqi_min = aqi_data["min"]["chn"]
+                    
+                    # PM2.5 data
+                    pm25_data = daily["air_quality"]["pm25"][i] if "pm25" in daily["air_quality"] and i < len(daily["air_quality"]["pm25"]) else None
+                    
+                    level, desc, icon = get_aqi_level_description(aqi_avg)
+                    day_name = ["今天", "明天", "后天"][i] if i < 3 else f"第{i+1}天"
+                    
+                    report += f"""{icon} {day_name} ({date}):
+📊 AQI: 平均{aqi_avg} (范围: {aqi_min}~{aqi_max}) - {level}
+"""
+                    
+                    if pm25_data:
+                        pm25_avg = pm25_data["avg"]
+                        pm25_max = pm25_data["max"]
+                        pm25_min = pm25_data["min"]
+                        pm25_level, pm25_icon = get_pm25_level(pm25_avg)
+                        report += f"{pm25_icon} PM2.5: 平均{pm25_avg}μg/m³ (范围: {pm25_min}~{pm25_max}μg/m³) - {pm25_level}\n"
+                    
+                    # Additional pollutants if available
+                    if "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
+                        pm10_avg = daily["air_quality"]["pm10"][i]["avg"]
+                        report += f"🌫️ PM10: {pm10_avg}μg/m³\n"
+                    
+                    if "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
+                        o3_avg = daily["air_quality"]["o3"][i]["avg"]  
+                        report += f"💨 臭氧: {o3_avg}μg/m³\n"
+                    
+                    report += f"💡 健康建议: {desc}\n"
+                    report += "------------------------\n"
+                    
+                    # Collect trend data
+                    aqi_trend.append(aqi_avg)
+                    if pm25_data:
+                        pm25_trend.append(pm25_avg)
+                
+                # Trend analysis
+                report += "\n📈 === 趋势分析 ===\n"
+                
+                if len(aqi_trend) >= 2:
+                    aqi_change = aqi_trend[-1] - aqi_trend[0]
+                    if aqi_change > 10:
+                        trend_desc = "📈 空气质量呈恶化趋势"
+                    elif aqi_change < -10:
+                        trend_desc = "📉 空气质量呈改善趋势"
+                    else:
+                        trend_desc = "➡️ 空气质量相对稳定"
+                    
+                    report += f"AQI变化: {aqi_trend[0]} → {aqi_trend[-1]} ({trend_desc})\n"
+                
+                if len(pm25_trend) >= 2:
+                    pm25_change = pm25_trend[-1] - pm25_trend[0]
+                    if pm25_change > 5:
+                        pm25_trend_desc = "📈 PM2.5浓度上升"
+                    elif pm25_change < -5:
+                        pm25_trend_desc = "📉 PM2.5浓度下降"
+                    else:
+                        pm25_trend_desc = "➡️ PM2.5浓度稳定"
+                    
+                    report += f"PM2.5变化: {pm25_trend[0]} → {pm25_trend[-1]}μg/m³ ({pm25_trend_desc})\n"
+                
+                # Best and worst days
+                if len(aqi_trend) > 1:
+                    best_day_idx = aqi_trend.index(min(aqi_trend))
+                    worst_day_idx = aqi_trend.index(max(aqi_trend))
+                    
+                    best_day_name = ["今天", "明天", "后天"][best_day_idx] if best_day_idx < 3 else f"第{best_day_idx+1}天"
+                    worst_day_name = ["今天", "明天", "后天"][worst_day_idx] if worst_day_idx < 3 else f"第{worst_day_idx+1}天"
+                    
+                    report += f"\n🌟 空气质量最好: {best_day_name} (AQI: {min(aqi_trend)})\n"
+                    report += f"⚠️ 空气质量最差: {worst_day_name} (AQI: {max(aqi_trend)})\n"
+                
+                # Health recommendations
+                avg_aqi = sum(aqi_trend) / len(aqi_trend) if aqi_trend else current_aqi
+                report += f"\n🏥 === 一周健康建议 ===\n"
+                report += f"平均AQI: {avg_aqi:.0f}\n"
+                
+                if avg_aqi <= 50:
+                    report += "✅ 空气质量优良，适合各类户外活动\n"
+                elif avg_aqi <= 100:
+                    report += "⚠️ 总体空气质量可接受，敏感人群应适当减少户外运动\n"
+                elif avg_aqi <= 150:
+                    report += "🚫 空气轻度污染，建议减少户外活动，敏感人群避免户外运动\n"
+                elif avg_aqi <= 200:
+                    report += "🚫 空气中度污染，建议避免户外运动，外出时佩戴口罩\n"
+                else:
+                    report += "🚨 空气重度污染，建议尽量待在室内，必要时使用空气净化器\n"
+                
+            else:
+                report += "⚠️ 未来空气质量预报数据不可用\n"
+            
+            return report
+            
+    except Exception as e:
+        logger.error(f"Error getting air quality forecast: {str(e)}")
+        raise Exception(f"Failed to get air quality forecast: {str(e)}")
+
+
+@mcp.tool()
 async def get_astronomy_info(
     lng: float = Field(
         description="The longitude of the location (-180 to 180)",
