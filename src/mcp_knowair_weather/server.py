@@ -7,6 +7,16 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from .config import config
+from .models import WeatherCoordinate, WeatherAPIResponse
+from .utils import (
+    translate_weather_phenomenon,
+    format_precipitation_intensity,
+    get_life_index_description,
+    get_aqi_level_description,
+    get_pm25_level_description
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,110 +24,11 @@ logger = logging.getLogger(__name__)
 # Initialize MCP server
 mcp = FastMCP("knowair-weather", dependencies=["mcp[cli]"])
 
-# Environment validation
-api_token = os.getenv("CAIYUN_WEATHER_API_TOKEN")
-if not api_token:
-    logger.warning("CAIYUN_WEATHER_API_TOKEN environment variable not set. Please configure your API token.")
+# Environment validation - handled by config module
 
-# Weather phenomenon mapping
-WEATHER_PHENOMENA = {
-    "CLEAR_DAY": "晴（白天）",
-    "CLEAR_NIGHT": "晴（夜间）", 
-    "PARTLY_CLOUDY_DAY": "多云（白天）",
-    "PARTLY_CLOUDY_NIGHT": "多云（夜间）",
-    "CLOUDY": "阴",
-    "LIGHT_HAZE": "轻度雾霾",
-    "MODERATE_HAZE": "中度雾霾", 
-    "HEAVY_HAZE": "重度雾霾",
-    "LIGHT_RAIN": "小雨",
-    "MODERATE_RAIN": "中雨",
-    "HEAVY_RAIN": "大雨",
-    "STORM_RAIN": "暴雨",
-    "FOG": "雾",
-    "LIGHT_SNOW": "小雪",
-    "MODERATE_SNOW": "中雪",
-    "HEAVY_SNOW": "大雪",
-    "STORM_SNOW": "暴雪",
-    "DUST": "浮尘",
-    "SAND": "沙尘",
-    "WIND": "大风"
-}
+# Utility functions now imported from utils module
 
-def translate_weather_phenomenon(skycon: str) -> str:
-    """Translate weather phenomenon code to Chinese description."""
-    return WEATHER_PHENOMENA.get(skycon, skycon)
-
-def format_precipitation_intensity(intensity: float, data_type: str = "radar") -> str:
-    """Format precipitation intensity with proper description based on data type."""
-    if data_type == "radar":
-        # 雷达降水强度 (0-1 范围)
-        if intensity < 0.031:
-            return f"{intensity:.3f} (无雨/雪)"
-        elif intensity < 0.25:
-            return f"{intensity:.3f} (小雨/雪)"
-        elif intensity < 0.35:
-            return f"{intensity:.3f} (中雨/雪)"
-        elif intensity < 0.48:
-            return f"{intensity:.3f} (大雨/雪)"
-        else:
-            return f"{intensity:.3f} (暴雨/雪)"
-    elif data_type == "hourly":
-        # 逐小时降水量 mm/h
-        if intensity < 0.0606:
-            return f"{intensity:.2f}mm/h (无雨/雪)"
-        elif intensity < 0.8989:
-            return f"{intensity:.2f}mm/h (小雨/雪)"
-        elif intensity < 2.87:
-            return f"{intensity:.2f}mm/h (中雨/雪)"
-        elif intensity < 12.8638:
-            return f"{intensity:.2f}mm/h (大雨/雪)"
-        else:
-            return f"{intensity:.2f}mm/h (暴雨/雪)"
-    elif data_type == "minutely":
-        # 分钟级降水量 mm/h
-        if intensity < 0.08:
-            return f"{intensity:.2f}mm/h (无雨/雪)"
-        elif intensity < 3.44:
-            return f"{intensity:.2f}mm/h (小雨/雪)"
-        elif intensity < 11.33:
-            return f"{intensity:.2f}mm/h (中雨/雪)"
-        elif intensity < 51.30:
-            return f"{intensity:.2f}mm/h (大雨/雪)"
-        else:
-            return f"{intensity:.2f}mm/h (暴雨/雪)"
-    else:
-        return f"{intensity:.3f}"
-
-def get_life_index_description(index_type: str, level: int) -> str:
-    """Get life index description in Chinese."""
-    descriptions = {
-        "ultraviolet": {
-            0: "无", 1: "很弱", 2: "很弱", 3: "弱", 4: "弱", 5: "中等",
-            6: "中等", 7: "强", 8: "强", 9: "强", 10: "很强", 11: "极强"
-        },
-        "ultraviolet_daily": {
-            1: "最弱", 2: "弱", 3: "中等", 4: "强", 5: "很强"
-        },
-        "dressing": {
-            0: "极热", 1: "极热", 2: "很热", 3: "热", 4: "温暖",
-            5: "凉爽", 6: "冷", 7: "寒冷", 8: "极冷"
-        },
-        "comfort": {
-            0: "闷热", 1: "酷热", 2: "很热", 3: "热", 4: "温暖",
-            5: "舒适", 6: "凉爽", 7: "冷", 8: "很冷", 9: "寒冷",
-            10: "极冷", 11: "刺骨的冷", 12: "湿冷", 13: "干冷"
-        },
-        "coldRisk": {
-            1: "少发", 2: "较易发", 3: "易发", 4: "极易发"
-        },
-        "carWashing": {
-            1: "适宜", 2: "较适宜", 3: "较不适宜", 4: "不适宜"
-        }
-    }
-    
-    if index_type in descriptions:
-        return descriptions[index_type].get(level, f"未知等级({level})")
-    return f"未知指数({index_type}: {level})"
+# Utility functions moved to utils.py module
 
 
 async def make_request(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,9 +55,7 @@ async def make_request(client: httpx.AsyncClient, url: str, params: Dict[str, An
 
 def validate_api_token() -> str:
     """Validate that API token is available."""
-    if not api_token:
-        raise Exception("API token not configured. Please set CAIYUN_WEATHER_API_TOKEN environment variable.")
-    return api_token
+    return config.validate_token()
 
 
 @mcp.tool()
@@ -170,8 +79,8 @@ async def get_realtime_weather(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/realtime",
-                {"lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/realtime"),
+                {"lang": config.default_lang},
             )
             rt = result["result"]["realtime"]
             
@@ -254,9 +163,9 @@ async def get_hourly_forecast(
         le=90.0
     ),
     hours: int = Field(
-        description="Number of hours to forecast (1-72)",
+        description="Number of hours to forecast (1-360)",
         ge=1,
-        le=72,
+        le=360,
         default=24
     ),
 ) -> str:
@@ -268,8 +177,8 @@ async def get_hourly_forecast(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/hourly",
-                {"hourlysteps": str(hours), "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/hourly"),
+                {"hourlysteps": str(hours), "lang": config.default_lang},
             )
             hourly = result["result"]["hourly"]
             description = hourly.get("description", f"未来{hours}小时天气预报")
@@ -344,35 +253,18 @@ async def get_hourly_forecast(
                 # Air quality (if available)
                 air_quality_info = ""
                 if "air_quality" in hourly:
-                    # Helper functions for air quality levels
-                    def get_aqi_icon(aqi):
-                        if aqi <= 50: return "🟢"
-                        elif aqi <= 100: return "🟡"
-                        elif aqi <= 150: return "🟠"
-                        elif aqi <= 200: return "🔴"
-                        elif aqi <= 300: return "🟣"
-                        else: return "⚫"
-                    
-                    def get_pm25_icon(pm25):
-                        if pm25 <= 35: return "🟢"
-                        elif pm25 <= 75: return "🟡"
-                        elif pm25 <= 115: return "🟠"
-                        elif pm25 <= 150: return "🔴"
-                        elif pm25 <= 250: return "🟣"
-                        else: return "⚫"
-                    
                     # AQI information
                     if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
                         aqi_data = hourly["air_quality"]["aqi"][i]["value"]
                         chn_aqi = aqi_data["chn"]
                         usa_aqi = aqi_data.get("usa", "N/A")
-                        aqi_icon = get_aqi_icon(chn_aqi)
+                        _, _, aqi_icon = get_aqi_level_description(chn_aqi)
                         air_quality_info += f"{aqi_icon} AQI: {chn_aqi} (美标:{usa_aqi})\n"
                     
                     # PM2.5 information
                     if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
                         pm25 = hourly["air_quality"]["pm25"][i]["value"]
-                        pm25_icon = get_pm25_icon(pm25)
+                        _, pm25_icon = get_pm25_level_description(pm25)
                         air_quality_info += f"{pm25_icon} PM2.5: {pm25}μg/m³\n"
                     
                     # Additional pollutants
@@ -428,9 +320,9 @@ async def get_daily_forecast(
         le=90.0
     ),
     days: int = Field(
-        description="Number of days to forecast (1-7)",
+        description="Number of days to forecast (1-15)",
         ge=1,
-        le=7,
+        le=15,
         default=7
     ),
 ) -> str:
@@ -442,8 +334,8 @@ async def get_daily_forecast(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/daily",
-                {"dailysteps": str(days), "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/daily"),
+                {"dailysteps": str(days), "lang": config.default_lang},
             )
             daily = result["result"]["daily"]
             
@@ -598,8 +490,8 @@ async def get_historical_weather(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/hourly",
-                {"hourlysteps": str(hours_back), "begin": str(timestamp), "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/hourly"),
+                {"hourlysteps": str(hours_back), "begin": str(timestamp), "lang": config.default_lang},
             )
             
             if "hourly" not in result["result"]:
@@ -688,8 +580,8 @@ async def get_minutely_precipitation(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/minutely",
-                {"lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/minutely"),
+                {"lang": config.default_lang},
             )
             
             # Check if minutely data is available
@@ -760,7 +652,7 @@ async def get_comprehensive_weather(
         
         async with httpx.AsyncClient() as client:
             # Prepare query parameters
-            params = {"dailysteps": "3", "lang": "zh_CN"}
+            params = {"dailysteps": "3", "lang": config.default_lang}
             if include_hourly:
                 params["hourlysteps"] = "24"
             if include_alerts:
@@ -768,7 +660,7 @@ async def get_comprehensive_weather(
             
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/weather",
+                config.get_api_url(f"{lng},{lat}/weather"),
                 params,
             )
             
@@ -930,48 +822,20 @@ async def get_air_quality_forecast(
             # Get both current air quality and forecast
             current_result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/realtime",
-                {"lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/realtime"),
+                {"lang": config.default_lang},
             )
             
             forecast_result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/daily",
-                {"dailysteps": str(days), "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/daily"),
+                {"dailysteps": str(days), "lang": config.default_lang},
             )
             
             current_air = current_result["result"]["realtime"]["air_quality"]
             daily = forecast_result["result"]["daily"]
             
-            def get_aqi_level_description(aqi):
-                """Get AQI level description in Chinese"""
-                if aqi <= 50:
-                    return "优", "空气质量令人满意，基本无空气污染", "🟢"
-                elif aqi <= 100:
-                    return "良", "空气质量可接受，但某些污染物可能对极少数异常敏感人群健康有较弱影响", "🟡"
-                elif aqi <= 150:
-                    return "轻度污染", "易感人群症状有轻度加剧，健康人群出现刺激症状", "🟠"
-                elif aqi <= 200:
-                    return "中度污染", "进一步加剧易感人群症状，可能对健康人群心脏、呼吸系统有影响", "🔴"
-                elif aqi <= 300:
-                    return "重度污染", "心脏病和肺病患者症状显著加剧，运动耐受力降低，健康人群普遍出现症状", "🟣"
-                else:
-                    return "严重污染", "健康人群运动耐受力降低，有明显强烈症状，提前出现某些疾病", "⚫"
-            
-            def get_pm25_level(pm25):
-                """Get PM2.5 level description"""
-                if pm25 <= 35:
-                    return "优秀", "🟢"
-                elif pm25 <= 75:
-                    return "良好", "🟡"
-                elif pm25 <= 115:
-                    return "轻度污染", "🟠"
-                elif pm25 <= 150:
-                    return "中度污染", "🔴"
-                elif pm25 <= 250:
-                    return "重度污染", "🟣"
-                else:
-                    return "严重污染", "⚫"
+            # Using imported utility functions
             
             report = f"🏭 空气质量预报 (未来{days}天)\n📍 位置: {lng}, {lat}\n\n"
             
@@ -979,7 +843,7 @@ async def get_air_quality_forecast(
             current_aqi = current_air["aqi"]["chn"]
             current_pm25 = current_air["pm25"]
             current_level, current_desc, current_icon = get_aqi_level_description(current_aqi)
-            pm25_level, pm25_icon = get_pm25_level(current_pm25)
+            pm25_level, pm25_icon = get_pm25_level_description(current_pm25)
             
             report += f"""🔄 当前空气质量 (实时):
 {current_icon} AQI: {current_aqi} ({current_level})
@@ -1025,7 +889,7 @@ async def get_air_quality_forecast(
                         pm25_avg = pm25_data["avg"]
                         pm25_max = pm25_data["max"]
                         pm25_min = pm25_data["min"]
-                        pm25_level, pm25_icon = get_pm25_level(pm25_avg)
+                        pm25_level, pm25_icon = get_pm25_level_description(pm25_avg)
                         report += f"{pm25_icon} PM2.5: 平均{pm25_avg}μg/m³ (范围: {pm25_min}~{pm25_max}μg/m³) - {pm25_level}\n"
                     
                     # Additional pollutants if available
@@ -1120,9 +984,9 @@ async def get_astronomy_info(
         le=90.0
     ),
     days: int = Field(
-        description="Number of days to get astronomy info (1-7)",
+        description="Number of days to get astronomy info (1-15)",
         ge=1,
-        le=7,
+        le=15,
         default=7
     ),
 ) -> str:
@@ -1134,8 +998,8 @@ async def get_astronomy_info(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/daily",
-                {"dailysteps": str(days), "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/daily"),
+                {"dailysteps": str(days), "lang": config.default_lang},
             )
             daily = result["result"]["daily"]
             
@@ -1222,6 +1086,7 @@ async def get_astronomy_info(
         raise Exception(f"Failed to get astronomy info: {str(e)}")
 
 
+
 @mcp.tool()
 async def get_weather_alerts(
     lng: float = Field(
@@ -1243,8 +1108,8 @@ async def get_weather_alerts(
         async with httpx.AsyncClient() as client:
             result = await make_request(
                 client,
-                f"https://api.caiyunapp.com/v2.6/{token}/{lng},{lat}/weather",
-                {"alert": "true", "lang": "zh_CN"},
+                config.get_api_url(f"{lng},{lat}/weather"),
+                {"alert": "true", "lang": config.default_lang},
             )
             
             alert_data = result["result"].get("alert", {})
