@@ -14,7 +14,8 @@ from .utils import (
     format_precipitation_intensity,
     get_life_index_description,
     get_aqi_level_description,
-    get_pm25_level_description
+    get_pm25_level_description,
+    safe_precipitation_probability
 )
 
 # Configure logging
@@ -34,7 +35,7 @@ mcp = FastMCP("knowair-weather", dependencies=["mcp[cli]"])
 async def make_request(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """Make HTTP request with proper error handling."""
     try:
-        response = await client.get(url, params=params, timeout=30.0)
+        response = await client.get(url, params=params, timeout=config.default_timeout)
         response.raise_for_status()
         return response.json()
     except httpx.TimeoutException:
@@ -128,7 +129,7 @@ async def get_realtime_weather(
                                 standard_desc = get_life_index_description("ultraviolet", uv_level)
                                 if standard_desc != f"未知等级({uv_level})":
                                     desc = standard_desc
-                            except:
+                            except (ValueError, TypeError):
                                 pass
                         elif key == "comfort":
                             try:
@@ -136,7 +137,7 @@ async def get_realtime_weather(
                                 standard_desc = get_life_index_description("comfort", comfort_level)
                                 if standard_desc != f"未知等级({comfort_level})":
                                     desc = standard_desc
-                            except:
+                            except (ValueError, TypeError):
                                 pass
                         
                         report += f"\n    {emoji} {name}: {desc} (等级: {index_value})"
@@ -231,7 +232,7 @@ async def get_hourly_forecast(
                 skycon = translate_weather_phenomenon(hourly["skycon"][i]["value"])
                 
                 # Precipitation data
-                rain_prob = int(hourly["precipitation"][i]["probability"] * 100)
+                rain_prob = safe_precipitation_probability(hourly["precipitation"][i]["probability"])
                 precip_value = hourly["precipitation"][i].get("value", 0)
                 precip_desc = format_precipitation_intensity(precip_value, "hourly")
                 
@@ -372,17 +373,17 @@ async def get_daily_forecast(
                     night_skycon = f"🌙 夜间天气: {translate_weather_phenomenon(daily['skycon_20h_32h'][i]['value'])}\n"
                 
                 # Precipitation data
-                rain_prob = int(daily["precipitation"][i]["probability"] * 100)
+                rain_prob = safe_precipitation_probability(daily["precipitation"][i]["probability"])
                 precip_avg = daily["precipitation"][i]["avg"]
                 
                 # Day/night precipitation
                 day_precip = ""
                 night_precip = ""
                 if "precipitation_08h_20h" in daily and i < len(daily["precipitation_08h_20h"]):
-                    day_prob = int(daily["precipitation_08h_20h"][i]["probability"] * 100)
+                    day_prob = safe_precipitation_probability(daily["precipitation_08h_20h"][i]["probability"])
                     day_precip = f"🌞 白天降水: {day_prob}%\n"
                 if "precipitation_20h_32h" in daily and i < len(daily["precipitation_20h_32h"]):
-                    night_prob = int(daily["precipitation_20h_32h"][i]["probability"] * 100)
+                    night_prob = safe_precipitation_probability(daily["precipitation_20h_32h"][i]["probability"])
                     night_precip = f"🌙 夜间降水: {night_prob}%\n"
                 
                 # Wind data
@@ -438,7 +439,7 @@ async def get_daily_forecast(
                                     
                                     if standard_desc != f"未知等级({level})" and standard_desc != f"未知指数({key}: {level})":
                                         desc = standard_desc
-                                except:
+                                except (ValueError, TypeError, KeyError):
                                     pass
                             
                             life_items.append(f"{emoji}{name}:{desc}")
@@ -510,7 +511,7 @@ async def get_historical_weather(
                 
                 # Precipitation data
                 precip_value = hourly["precipitation"][i].get("value", 0)
-                precip_prob = int(hourly["precipitation"][i]["probability"] * 100)
+                precip_prob = safe_precipitation_probability(hourly["precipitation"][i]["probability"])
                 
                 # Wind data
                 wind_speed = hourly["wind"][i]["speed"]
@@ -738,7 +739,7 @@ PM2.5: {aq["pm25"]}μg/m³ | PM10: {aq["pm10"]}μg/m³
                     time = hourly["temperature"][i]["datetime"]
                     temp = hourly["temperature"][i]["value"]
                     skycon = translate_weather_phenomenon(hourly["skycon"][i]["value"])
-                    rain_prob = int(hourly["precipitation"][i]["probability"] * 100)
+                    rain_prob = safe_precipitation_probability(hourly["precipitation"][i]["probability"])
                     wind_speed = hourly["wind"][i]["speed"]
                     
                     report += f"{time}: {temp}°C, {skycon}, 降水概率{rain_prob}%, 风速{wind_speed}km/h\n"
@@ -755,7 +756,7 @@ PM2.5: {aq["pm25"]}μg/m³ | PM10: {aq["pm10"]}μg/m³
                     temp_max = daily["temperature"][i]["max"]
                     temp_min = daily["temperature"][i]["min"]
                     skycon = translate_weather_phenomenon(daily["skycon"][i]["value"])
-                    rain_prob = int(daily["precipitation"][i]["probability"] * 100)
+                    rain_prob = safe_precipitation_probability(daily["precipitation"][i]["probability"])
                     
                     # 日出日落时间
                     sun_info = ""
@@ -1036,7 +1037,7 @@ async def get_astronomy_info(
                         hours, remainder = divmod(daylight_duration.total_seconds(), 3600)
                         minutes = remainder // 60
                         daylight_info = f" (日照时长: {int(hours)}小时{int(minutes)}分钟)"
-                    except:
+                    except (ValueError, TypeError):
                         daylight_info = ""
                     
                     astro_info += f"☀️ 日出: {sunrise} | 🌅 日落: {sunset}{daylight_info}\n"
@@ -1048,7 +1049,7 @@ async def get_astronomy_info(
                         moonrise = astro["moonrise"]["time"] if isinstance(astro["moonrise"], dict) else astro["moonrise"]
                         moonset = astro["moonset"]["time"] if isinstance(astro["moonset"], dict) else astro["moonset"]
                         moon_info = f"🌙 月出: {moonrise} | 🌛 月落: {moonset}\n"
-                    except:
+                    except (KeyError, TypeError):
                         moon_info = "🌙 月出月落: 数据不可用\n"
                 else:
                     moon_info = "🌙 月出月落: 数据不可用\n"
@@ -1143,7 +1144,7 @@ async def get_weather_alerts(
                     try:
                         pub_dt = datetime.fromtimestamp(alert["pubtimestamp"])
                         pub_time = pub_dt.strftime("%Y-%m-%d %H:%M")
-                    except:
+                    except (ValueError, TypeError, OSError):
                         pub_time = "未知时间"
                 
                 alert_text += f"""🚨 预警 {i}:

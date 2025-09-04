@@ -134,3 +134,26 @@ def get_pm25_level_description(pm25: int) -> tuple[str, str]:
         return "重度污染", "🟣"
     else:
         return "严重污染", "⚫"
+
+
+def safe_precipitation_probability(probability) -> int:
+    """Safely convert precipitation probability to percentage."""
+    # Handle None or invalid data
+    if probability is None:
+        return 0
+    
+    try:
+        prob_float = float(probability)
+    except (ValueError, TypeError):
+        return 0
+    
+    # Handle different API response formats
+    if prob_float <= 1.0:
+        # Probability is in 0-1 range, convert to percentage
+        return int(prob_float * 100)
+    elif prob_float <= 100.0:
+        # Probability is already in percentage
+        return int(prob_float)
+    else:
+        # Invalid data, cap at 100%
+        return 100
