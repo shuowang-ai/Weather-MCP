@@ -1,6 +1,6 @@
 """Utility functions for weather data processing."""
 
-from typing import Dict
+from typing import Dict, Any
 
 
 def translate_weather_phenomenon(skycon: str) -> str:
@@ -157,3 +157,84 @@ def safe_precipitation_probability(probability) -> int:
     else:
         # Invalid data, cap at 100%
         return 100
+
+
+def format_air_quality_data(air_quality_data: Dict[str, Any], data_type: str = "realtime") -> str:
+    """Format air quality data into a consistent string format.
+    
+    Args:
+        air_quality_data: Air quality data dictionary
+        data_type: Type of data ("realtime", "hourly", "daily")
+    
+    Returns:
+        Formatted air quality string
+    """
+    if not air_quality_data:
+        return ""
+    
+    air_info = ""
+    
+    # AQI information
+    if "aqi" in air_quality_data:
+        aqi_data = air_quality_data["aqi"]
+        if isinstance(aqi_data, dict):
+            chn_aqi = aqi_data.get("chn", "N/A")
+            usa_aqi = aqi_data.get("usa", "N/A")
+            level, desc, icon = get_aqi_level_description(chn_aqi)
+            air_info += f"{icon} AQI: {chn_aqi} (美标:{usa_aqi})\n"
+        else:
+            air_info += f"🏭 AQI: {aqi_data}\n"
+    
+    # PM2.5 information
+    if "pm25" in air_quality_data:
+        pm25 = air_quality_data["pm25"]
+        level, icon = get_pm25_level_description(pm25)
+        air_info += f"{icon} PM2.5: {pm25}μg/m³\n"
+    
+    # PM10 information
+    if "pm10" in air_quality_data:
+        pm10 = air_quality_data["pm10"]
+        air_info += f"🌫️ PM10: {pm10}μg/m³\n"
+    
+    # O3 information
+    if "o3" in air_quality_data:
+        o3 = air_quality_data["o3"]
+        air_info += f"💨 臭氧: {o3}μg/m³\n"
+    
+    # Additional pollutants
+    pollutants = [
+        ("no2", "🌬️ NO2", "μg/m³"),
+        ("so2", "☁️ SO2", "μg/m³"),
+        ("co", "💨 CO", "mg/m³")
+    ]
+    
+    for pollutant, icon, unit in pollutants:
+        if pollutant in air_quality_data:
+            value = air_quality_data[pollutant]
+            air_info += f"{icon}: {value}{unit}\n"
+    
+    return air_info
+
+
+def get_air_quality_summary(air_quality_data: Dict[str, Any]) -> str:
+    """Get a concise air quality summary for display in compact formats."""
+    if not air_quality_data:
+        return ""
+    
+    summary_parts = []
+    
+    if "aqi" in air_quality_data:
+        aqi_data = air_quality_data["aqi"]
+        if isinstance(aqi_data, dict):
+            chn_aqi = aqi_data.get("chn", "N/A")
+            summary_parts.append(f"AQI:{chn_aqi}")
+        else:
+            summary_parts.append(f"AQI:{aqi_data}")
+    
+    for pollutant in ["pm25", "pm10", "o3"]:
+        if pollutant in air_quality_data:
+            value = air_quality_data[pollutant]
+            unit = "μg/m³"
+            summary_parts.append(f"{pollutant.upper()}:{value}{unit}")
+    
+    return " ".join(summary_parts)

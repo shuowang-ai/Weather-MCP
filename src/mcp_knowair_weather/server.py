@@ -33,25 +33,55 @@ mcp = FastMCP("knowair-weather", dependencies=["mcp[cli]"])
 
 
 async def make_request(client: httpx.AsyncClient, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """Make HTTP request with proper error handling."""
-    try:
-        response = await client.get(url, params=params, timeout=config.default_timeout)
-        response.raise_for_status()
-        return response.json()
-    except httpx.TimeoutException:
-        logger.error(f"Request timeout for URL: {url}")
-        raise Exception("Request timeout - please try again")
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error {e.response.status_code} for URL: {url}")
-        if e.response.status_code == 401:
-            raise Exception("Invalid API token - please check your CAIYUN_WEATHER_API_TOKEN")
-        elif e.response.status_code == 429:
-            raise Exception("API rate limit exceeded - please try again later")
-        else:
-            raise Exception(f"API request failed with status {e.response.status_code}")
-    except Exception as e:
-        logger.error(f"Unexpected error for URL: {url} - {str(e)}")
-        raise Exception(f"Weather data request failed: {str(e)}")
+    """Make HTTP request with proper error handling and retry mechanism."""
+    import time
+    
+    for attempt in range(config.max_retries):
+        start_time = time.time()
+        try:
+            response = await client.get(url, params=params, timeout=config.default_timeout)
+            response.raise_for_status()
+            result = response.json()
+            
+            # Record successful request
+            response_time = time.time() - start_time
+            config.record_request(True, response_time)
+            
+            return result
+            
+        except httpx.TimeoutException:
+            response_time = time.time() - start_time
+            config.record_request(False, response_time)
+            logger.error(f"Request timeout (attempt {attempt + 1}/{config.max_retries}) for URL: {url}")
+            if attempt == config.max_retries - 1:
+                raise Exception("Request timeout - please try again")
+            time.sleep(1)  # Wait before retry
+            
+        except httpx.HTTPStatusError as e:
+            response_time = time.time() - start_time
+            config.record_request(False, response_time)
+            logger.error(f"HTTP error {e.response.status_code} (attempt {attempt + 1}/{config.max_retries}) for URL: {url}")
+            if e.response.status_code == 401:
+                raise Exception("Invalid API token - please check your CAIYUN_WEATHER_API_TOKEN")
+            elif e.response.status_code == 429:
+                if attempt == config.max_retries - 1:
+                    raise Exception("API rate limit exceeded - please try again later")
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                if attempt == config.max_retries - 1:
+                    raise Exception(f"API request failed with status {e.response.status_code}")
+                time.sleep(1)
+                
+        except Exception as e:
+            response_time = time.time() - start_time
+            config.record_request(False, response_time)
+            logger.error(f"Unexpected error (attempt {attempt + 1}/{config.max_retries}) for URL: {url} - {str(e)}")
+            if attempt == config.max_retries - 1:
+                raise Exception(f"Weather data request failed: {str(e)}")
+            time.sleep(1)
+    
+    # This should never be reached, but just in case
+    raise Exception("All retry attempts failed")
 
 
 def validate_api_token() -> str:
@@ -408,6 +438,12 @@ async def get_daily_forecast(
                     if "pm25" in daily["air_quality"] and i < len(daily["air_quality"]["pm25"]):
                         pm25_avg = daily["air_quality"]["pm25"][i]["avg"]
                         air_quality_info += f"🏭 PM2.5: {pm25_avg}μg/m³\n"
+                    if "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
+                        pm10_avg = daily["air_quality"]["pm10"][i]["avg"]
+                        air_quality_info += f"🌫️ PM10: {pm10_avg}μg/m³\n"
+                    if "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
+                        o3_avg = daily["air_quality"]["o3"][i]["avg"]
+                        air_quality_info += f"💨 臭氧: {o3_avg}μg/m³\n"
                 
                 # Sunrise/sunset
                 sun_info = ""
@@ -742,7 +778,23 @@ PM2.5: {aq["pm25"]}μg/m³ | PM10: {aq["pm10"]}μg/m³
                     rain_prob = safe_precipitation_probability(hourly["precipitation"][i]["probability"])
                     wind_speed = hourly["wind"][i]["speed"]
                     
-                    report += f"{time}: {temp}°C, {skycon}, 降水概率{rain_prob}%, 风速{wind_speed}km/h\n"
+                    # 空气质量信息
+                    air_info = ""
+                    if "air_quality" in hourly:
+                        if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
+                            aqi = hourly["air_quality"]["aqi"][i]["value"]["chn"]
+                            air_info += f" AQI:{aqi}"
+                        if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
+                            pm25 = hourly["air_quality"]["pm25"][i]["value"]
+                            air_info += f" PM2.5:{pm25}μg/m³"
+                        if "pm10" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm10"]):
+                            pm10 = hourly["air_quality"]["pm10"][i]["value"]
+                            air_info += f" PM10:{pm10}μg/m³"
+                        if "o3" in hourly["air_quality"] and i < len(hourly["air_quality"]["o3"]):
+                            o3 = hourly["air_quality"]["o3"][i]["value"]
+                            air_info += f" O3:{o3}μg/m³"
+                    
+                    report += f"{time}: {temp}°C, {skycon}, 降水概率{rain_prob}%, 风速{wind_speed}km/h{air_info}\n"
                 
                 report += "\n"
             
@@ -1163,6 +1215,45 @@ async def get_weather_alerts(
     except Exception as e:
         logger.error(f"Error getting weather alerts: {str(e)}")
         raise Exception(f"Failed to get weather alerts: {str(e)}")
+
+
+@mcp.tool()
+async def get_server_stats() -> str:
+    """Get server performance statistics and cache information."""
+    try:
+        stats = config.get_stats()
+        
+        report = f"""📊 服务器性能统计:
+        
+🔢 请求统计:
+   总请求数: {stats['total_requests']}
+   成功请求: {stats['successful_requests']}
+   失败请求: {stats['failed_requests']}
+   成功率: {stats.get('success_rate', 0):.1%}
+   
+⏱️ 性能指标:
+   平均响应时间: {stats['average_response_time']:.2f}秒
+   
+💾 缓存统计:
+   缓存命中: {stats['cache_hits']}
+   缓存未命中: {stats['cache_misses']}
+   缓存命中率: {stats.get('cache_hit_rate', 0):.1%}
+   
+⚙️ 配置信息:
+   API超时: {config.default_timeout}秒
+   最大重试次数: {config.max_retries}
+   默认语言: {config.default_lang}
+   最大小时预报: {config.max_hourly_hours}小时
+   最大日预报: {config.max_daily_days}天
+   
+🔄 服务状态: 运行中
+⏰ 统计时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+        
+        return report
+        
+    except Exception as e:
+        logger.error(f"Error getting server stats: {str(e)}")
+        return f"❌ 获取服务器统计信息失败: {str(e)}"
 
 
 def main():
