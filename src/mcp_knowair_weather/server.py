@@ -891,6 +891,22 @@ async def get_air_quality_forecast(
                 {"dailysteps": str(days), "lang": config.default_lang},
             )
             
+            # Also get station data for more detailed PM10 and O3 forecasts
+            station_result = None
+            try:
+                station_result = await make_request(
+                    client,
+                    "https://singer.caiyunhub.com/v3/aqi/forecast/station",
+                    {
+                        "token": token,
+                        "longitude": lng,
+                        "latitude": lat,
+                        "hours": str(days * 24)  # Convert days to hours
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Station data not available: {str(e)}")
+            
             current_air = current_result["result"]["realtime"]["air_quality"]
             daily = forecast_result["result"]["daily"]
             
@@ -917,13 +933,40 @@ async def get_air_quality_forecast(
 
 """
             
+            # Process station data for enhanced PM10 and O3 info
+            station_daily_data = {}
+            if station_result and "data" in station_result and station_result["data"]:
+                # Group station data by day for easier access
+                station_forecast = station_result["data"][0]["data"]  # Use nearest station
+                station_id = station_result["data"][0]["station_id"]
+                
+                for data_point in station_forecast:
+                    day_key = data_point["date"][:10]  # Extract date (YYYY-MM-DD)
+                    if day_key not in station_daily_data:
+                        station_daily_data[day_key] = {
+                            "pm10_values": [],
+                            "o3_values": [],
+                            "pm25_values": [],
+                            "aqi_values": []
+                        }
+                    station_daily_data[day_key]["pm10_values"].append(data_point["pm10"])
+                    station_daily_data[day_key]["o3_values"].append(data_point["o3"])
+                    station_daily_data[day_key]["pm25_values"].append(data_point["pm25"])
+                    station_daily_data[day_key]["aqi_values"].append(data_point["aqi"])
+
             # Daily air quality forecast
             if "air_quality" in daily:
-                report += "📅 === 未来空气质量预报 ===\n\n"
+                report += "📅 === 未来空气质量预报 ===\n"
+                if station_daily_data:
+                    report += f"💡 PM10和O3数据来自监测站: {station_id}\n\n"
+                else:
+                    report += "\n"
                 
                 # Track trends
                 aqi_trend = []
                 pm25_trend = []
+                pm10_trend = []
+                o3_trend = []
                 
                 for i in range(min(days, len(daily["air_quality"]["aqi"]))):
                     date = daily["air_quality"]["aqi"][i]["date"].split("T")[0]
@@ -951,15 +994,40 @@ async def get_air_quality_forecast(
                         pm25_level, pm25_icon = get_pm25_level_description(pm25_avg)
                         report += f"{pm25_icon} PM2.5: 平均{pm25_avg}μg/m³ (范围: {pm25_min}~{pm25_max}μg/m³) - {pm25_level}\n"
                     
-                    # Additional pollutants if available
-                    if "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
-                        pm10_avg = daily["air_quality"]["pm10"][i]["avg"]
-                        report += f"🌫️ PM10: {pm10_avg}μg/m³\n"
+                    # Enhanced PM10 and O3 data from station if available
+                    pm10_info = ""
+                    o3_info = ""
                     
-                    if "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
-                        o3_avg = daily["air_quality"]["o3"][i]["avg"]  
-                        report += f"💨 臭氧: {o3_avg}μg/m³\n"
+                    if date in station_daily_data:
+                        pm10_values = station_daily_data[date]["pm10_values"]
+                        o3_values = station_daily_data[date]["o3_values"]
+                        
+                        if pm10_values:
+                            pm10_avg = sum(pm10_values) / len(pm10_values)
+                            pm10_min = min(pm10_values)
+                            pm10_max = max(pm10_values)
+                            pm10_info = f"🌫️ PM10: 平均{pm10_avg:.0f}μg/m³ (范围: {pm10_min}~{pm10_max}μg/m³) [监测站数据]\n"
+                            pm10_trend.append(pm10_avg)
+                        
+                        if o3_values:
+                            o3_avg = sum(o3_values) / len(o3_values)
+                            o3_min = min(o3_values)
+                            o3_max = max(o3_values)
+                            o3_info = f"💨 臭氧: 平均{o3_avg:.0f}μg/m³ (范围: {o3_min}~{o3_max}μg/m³) [监测站数据]\n"
+                            o3_trend.append(o3_avg)
+                    else:
+                        # Fallback to regular daily API data
+                        if "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
+                            pm10_avg = daily["air_quality"]["pm10"][i]["avg"]
+                            pm10_info = f"🌫️ PM10: {pm10_avg}μg/m³\n"
+                            pm10_trend.append(pm10_avg)
+                        
+                        if "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
+                            o3_avg = daily["air_quality"]["o3"][i]["avg"]  
+                            o3_info = f"💨 臭氧: {o3_avg}μg/m³\n"
+                            o3_trend.append(o3_avg)
                     
+                    report += pm10_info + o3_info
                     report += f"💡 健康建议: {desc}\n"
                     report += "------------------------\n"
                     
@@ -992,6 +1060,30 @@ async def get_air_quality_forecast(
                         pm25_trend_desc = "➡️ PM2.5浓度稳定"
                     
                     report += f"PM2.5变化: {pm25_trend[0]} → {pm25_trend[-1]}μg/m³ ({pm25_trend_desc})\n"
+                
+                # Enhanced PM10 trend analysis
+                if len(pm10_trend) >= 2:
+                    pm10_change = pm10_trend[-1] - pm10_trend[0]
+                    if pm10_change > 10:
+                        pm10_trend_desc = "📈 PM10浓度上升"
+                    elif pm10_change < -10:
+                        pm10_trend_desc = "📉 PM10浓度下降"
+                    else:
+                        pm10_trend_desc = "➡️ PM10浓度稳定"
+                    
+                    report += f"PM10变化: {pm10_trend[0]:.0f} → {pm10_trend[-1]:.0f}μg/m³ ({pm10_trend_desc})\n"
+                
+                # Enhanced O3 trend analysis
+                if len(o3_trend) >= 2:
+                    o3_change = o3_trend[-1] - o3_trend[0]
+                    if o3_change > 20:
+                        o3_trend_desc = "📈 臭氧浓度上升"
+                    elif o3_change < -20:
+                        o3_trend_desc = "📉 臭氧浓度下降"
+                    else:
+                        o3_trend_desc = "➡️ 臭氧浓度稳定"
+                    
+                    report += f"臭氧变化: {o3_trend[0]:.0f} → {o3_trend[-1]:.0f}μg/m³ ({o3_trend_desc})\n"
                 
                 # Best and worst days
                 if len(aqi_trend) > 1:
