@@ -1,6 +1,11 @@
 """Utility functions for weather data processing."""
 
-from typing import Dict, Any
+import math
+import httpx
+from typing import Dict, Any, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def translate_weather_phenomenon(skycon: str) -> str:
@@ -238,3 +243,114 @@ def get_air_quality_summary(air_quality_data: Dict[str, Any]) -> str:
             summary_parts.append(f"{pollutant.upper()}:{value}{unit}")
     
     return " ".join(summary_parts)
+
+
+def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Calculate distance between two coordinates in km using Haversine formula."""
+    R = 6371  # Earth's radius in kilometers
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (math.sin(dlat / 2) ** 2 + 
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+         math.sin(dlng / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+
+def handle_detail_level_parameter(detail_level: Any) -> int:
+    """Handle potential FastMCP parameter issue for detail_level parameter."""
+    if hasattr(detail_level, 'default'):
+        return detail_level.default
+    elif not isinstance(detail_level, int):
+        return 0  # fallback to auto-select
+    return detail_level
+
+
+def get_display_interval(hours: int, detail_level: int) -> Tuple[int, str]:
+    """
+    Determine display interval and description based on forecast duration and user preference.
+    
+    Args:
+        hours: Number of hours to forecast
+        detail_level: User preference (0=auto-select, 1=hourly, 2=every 2h, etc.)
+    
+    Returns:
+        Tuple of (step_size, description)
+    """
+    if detail_level == 0:
+        # Auto-select based on forecast duration
+        if hours <= 12:
+            step = 1  # Every hour for short forecasts
+        elif hours <= 48:
+            step = 2  # Every 2 hours for 1-2 day forecasts
+        elif hours <= 120:
+            step = 3  # Every 3 hours for up to 5 days
+        else:
+            step = 6  # Every 6 hours for long forecasts
+    else:
+        # Use user-specified detail level
+        step = detail_level
+    
+    # Generate description
+    if step == 1:
+        description = "每小时"
+    else:
+        description = f"每{step}小时"
+    
+    return step, description
+
+
+async def fetch_station_data(client: httpx.AsyncClient, token: str, lng: float, lat: float, hours: int) -> Optional[Dict[str, Any]]:
+    """
+    Fetch station air quality data with proper error handling.
+    
+    Returns None if station data is not available.
+    """
+    try:
+        from .server import make_request  # Import here to avoid circular import
+        return await make_request(
+            client,
+            "https://singer.caiyunhub.com/v3/aqi/forecast/station",
+            {
+                "token": token,
+                "longitude": lng,
+                "latitude": lat,
+                "hours": str(hours)
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Station data not available: {str(e)}")
+        return None
+
+
+def process_station_daily_data(station_result: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, list]], str]:
+    """
+    Process station result into daily aggregated data.
+    
+    Returns:
+        Tuple of (daily_data_dict, station_info_string)
+    """
+    station_daily_data = {}
+    station_info = ""
+    
+    if station_result and "data" in station_result and station_result["data"]:
+        # Group station data by day for easier access
+        station_forecast = station_result["data"][0]["data"]  # Use nearest station
+        station_id = station_result["data"][0]["station_id"]
+        station_info = f"💡 PM10和O3数据来自监测站: {station_id}\n\n"
+        
+        for data_point in station_forecast:
+            day_key = data_point["date"][:10]  # Extract date (YYYY-MM-DD)
+            if day_key not in station_daily_data:
+                station_daily_data[day_key] = {
+                    "pm10_values": [],
+                    "o3_values": [],
+                    "pm25_values": [],
+                    "aqi_values": []
+                }
+            station_daily_data[day_key]["pm10_values"].append(data_point["pm10"])
+            station_daily_data[day_key]["o3_values"].append(data_point["o3"])
+            station_daily_data[day_key]["pm25_values"].append(data_point["pm25"])
+            station_daily_data[day_key]["aqi_values"].append(data_point["aqi"])
+    
+    return station_daily_data, station_info

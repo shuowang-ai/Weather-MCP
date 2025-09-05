@@ -506,9 +506,49 @@ async def get_daily_forecast(
                 config.get_api_url(f"{lng},{lat}/daily"),
                 {"dailysteps": str(days), "lang": config.default_lang},
             )
+            
+            # Also get station data for enhanced PM10 and O3 forecasts
+            station_result = None
+            try:
+                station_result = await make_request(
+                    client,
+                    "https://singer.caiyunhub.com/v3/aqi/forecast/station",
+                    {
+                        "token": token,
+                        "longitude": lng,
+                        "latitude": lat,
+                        "hours": str(days * 24)  # Convert days to hours for station API
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Station data not available for daily forecast: {str(e)}")
+            
             daily = result["result"]["daily"]
             
-            forecast = f"📅 未来{days}天天气预报:\n\n"
+            # Process station data for enhanced PM10 and O3 info
+            station_daily_data = {}
+            station_info = ""
+            if station_result and "data" in station_result and station_result["data"]:
+                # Group station data by day for easier access
+                station_forecast = station_result["data"][0]["data"]  # Use nearest station
+                station_id = station_result["data"][0]["station_id"]
+                station_info = f"💡 PM10和O3数据来自监测站: {station_id}\n\n"
+                
+                for data_point in station_forecast:
+                    day_key = data_point["date"][:10]  # Extract date (YYYY-MM-DD)
+                    if day_key not in station_daily_data:
+                        station_daily_data[day_key] = {
+                            "pm10_values": [],
+                            "o3_values": [],
+                            "pm25_values": [],
+                            "aqi_values": []
+                        }
+                    station_daily_data[day_key]["pm10_values"].append(data_point["pm10"])
+                    station_daily_data[day_key]["o3_values"].append(data_point["o3"])
+                    station_daily_data[day_key]["pm25_values"].append(data_point["pm25"])
+                    station_daily_data[day_key]["aqi_values"].append(data_point["aqi"])
+            
+            forecast = f"📅 未来{days}天天气预报:\n{station_info}"
             
             for i in range(min(days, len(daily["temperature"]))):
                 date = daily["temperature"][i]["date"].split("T")[0]
@@ -567,8 +607,30 @@ async def get_daily_forecast(
                     humidity_avg = int(daily["humidity"][i]["avg"] * 100)
                     humidity_info = f"💧 湿度: {humidity_avg}%\n"
                 
-                # Air quality
+                # Enhanced Air quality with station data
                 air_quality_info = ""
+                
+                # Check for station data for this date
+                enhanced_pm10_info = ""
+                enhanced_o3_info = ""
+                
+                if date in station_daily_data:
+                    pm10_values = station_daily_data[date]["pm10_values"]
+                    o3_values = station_daily_data[date]["o3_values"]
+                    
+                    if pm10_values:
+                        pm10_avg = sum(pm10_values) / len(pm10_values)
+                        pm10_min = min(pm10_values)
+                        pm10_max = max(pm10_values)
+                        enhanced_pm10_info = f"🌫️ PM10: 平均{pm10_avg:.0f}μg/m³ (范围: {pm10_min}~{pm10_max}μg/m³) [监测站]\n"
+                    
+                    if o3_values:
+                        o3_avg = sum(o3_values) / len(o3_values)
+                        o3_min = min(o3_values)
+                        o3_max = max(o3_values)
+                        enhanced_o3_info = f"💨 臭氧: 平均{o3_avg:.0f}μg/m³ (范围: {o3_min}~{o3_max}μg/m³) [监测站]\n"
+                
+                # Build air quality info
                 if "air_quality" in daily:
                     if "aqi" in daily["air_quality"] and i < len(daily["air_quality"]["aqi"]):
                         aqi_avg = daily["air_quality"]["aqi"][i]["avg"]["chn"]
@@ -576,10 +638,17 @@ async def get_daily_forecast(
                     if "pm25" in daily["air_quality"] and i < len(daily["air_quality"]["pm25"]):
                         pm25_avg = daily["air_quality"]["pm25"][i]["avg"]
                         air_quality_info += f"🏭 PM2.5: {pm25_avg}μg/m³\n"
-                    if "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
+                    
+                    # Use enhanced station data if available, otherwise fallback to regular API
+                    if enhanced_pm10_info:
+                        air_quality_info += enhanced_pm10_info
+                    elif "pm10" in daily["air_quality"] and i < len(daily["air_quality"]["pm10"]):
                         pm10_avg = daily["air_quality"]["pm10"][i]["avg"]
                         air_quality_info += f"🌫️ PM10: {pm10_avg}μg/m³\n"
-                    if "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
+                    
+                    if enhanced_o3_info:
+                        air_quality_info += enhanced_o3_info
+                    elif "o3" in daily["air_quality"] and i < len(daily["air_quality"]["o3"]):
                         o3_avg = daily["air_quality"]["o3"][i]["avg"]
                         air_quality_info += f"💨 臭氧: {o3_avg}μg/m³\n"
                 
@@ -1465,11 +1534,31 @@ async def get_air_quality_station_forecast(
         le=360,
         default=168  # 7 days
     ),
+    detail_level: int = Field(
+        description="Detail level: 0=auto-select, 1=every hour, 2=every 2 hours, 3=every 3 hours, etc. (0-6)",
+        ge=0,
+        le=6,
+        default=0  # 0 means auto-select based on hours
+    ),
 ) -> str:
-    """Get air quality forecast from the nearest monitoring station including PM2.5, PM10, O3, and other pollutants."""
+    """Get air quality forecast from the nearest monitoring station including PM2.5, PM10, O3, and other pollutants.
+    
+    Use detail_level parameter to control display frequency:
+    - detail_level=0: Auto-select based on forecast duration (default)
+    - detail_level=1: Every hour (most detailed)
+    - detail_level=2: Every 2 hours 
+    - detail_level=3: Every 3 hours
+    """
     try:
         token = validate_api_token()
-        logger.info(f"Getting station-based air quality forecast for coordinates: {lng}, {lat} for {hours} hours")
+        
+        # Handle potential FastMCP parameter issue
+        if hasattr(detail_level, 'default'):
+            detail_level = detail_level.default
+        elif not isinstance(detail_level, int):
+            detail_level = 0  # fallback to auto-select
+            
+        logger.info(f"Getting station-based air quality forecast for coordinates: {lng}, {lat} for {hours} hours, detail_level: {detail_level}")
         
         async with httpx.AsyncClient() as client:
             result = await make_request(
@@ -1521,15 +1610,30 @@ async def get_air_quality_station_forecast(
             if len(stations) > 1:
                 report += f"💡 共找到{len(stations)}个监测站，显示最近的监测站数据\n\n"
             
-            # Group data by days for better readability
-            if hours <= 48:
-                # Show hourly data for short periods
-                report += "⏰ === 逐小时空气质量预报 ===\n\n"
-                step = 1
+            # Determine display interval based on user preference or auto-selection
+            if detail_level == 0:
+                # Auto-select based on forecast duration for optimal readability
+                if hours <= 12:
+                    step = 1  # Every hour for short forecasts
+                elif hours <= 48:
+                    step = 2  # Every 2 hours for 1-2 day forecasts
+                elif hours <= 120:
+                    step = 3  # Every 3 hours for up to 5 days
+                else:
+                    step = 6  # Every 6 hours for long forecasts
             else:
-                # Show every 6 hours for longer periods
-                report += "⏰ === 空气质量预报 (每6小时) ===\n\n"
-                step = 6
+                # Use user-specified detail level
+                step = detail_level
+            
+            # Add display interval information
+            if step == 1:
+                interval_desc = "⏰ === 逐小时空气质量预报 ===\n"
+            else:
+                interval_desc = f"⏰ === 空气质量预报 (每{step}小时) ===\n"
+                if detail_level == 0:  # Only show hint for auto-selected intervals
+                    interval_desc += f"💡 如需更详细预报，请设置 detail_level=1\n"
+            
+            report += interval_desc + "\n"
             
             # Process forecast data
             for i in range(0, min(len(forecast_data), hours), step):
