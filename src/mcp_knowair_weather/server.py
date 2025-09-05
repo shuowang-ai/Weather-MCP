@@ -199,11 +199,31 @@ async def get_hourly_forecast(
         le=360,
         default=24
     ),
+    detail_level: int = Field(
+        description="Detail level: 0=auto-select, 1=every hour, 2=every 2 hours, 3=every 3 hours, etc. (0-6)",
+        ge=0,
+        le=6,
+        default=0  # 0 means auto-select based on hours
+    ),
 ) -> str:
-    """Get detailed hourly weather forecast including temperature, apparent temperature, weather conditions, precipitation, wind, air quality, and more."""
+    """Get detailed hourly weather forecast including temperature, apparent temperature, weather conditions, precipitation, wind, air quality, and more. 
+    
+    Use detail_level parameter to control display frequency:
+    - detail_level=0: Auto-select based on forecast duration (default)
+    - detail_level=1: Every hour (most detailed)
+    - detail_level=2: Every 2 hours 
+    - detail_level=3: Every 3 hours
+    """
     try:
         token = validate_api_token()
-        logger.info(f"Getting {hours}-hour forecast for coordinates: {lng}, {lat}")
+        
+        # Handle potential FastMCP parameter issue
+        if hasattr(detail_level, 'default'):
+            detail_level = detail_level.default
+        elif not isinstance(detail_level, int):
+            detail_level = 0  # fallback to auto-select
+            
+        logger.info(f"Getting {hours}-hour forecast for coordinates: {lng}, {lat}, detail_level: {detail_level}")
         
         async with httpx.AsyncClient() as client:
             result = await make_request(
@@ -315,8 +335,28 @@ async def get_hourly_forecast(
             if air_quality_trend:
                 forecast += f"🏭 === 空气质量趋势 ===\n{station_info}{air_quality_trend}"
             
-            # Show every 3 hours for better readability if more than 24 hours
-            step = 3 if hours > 24 else 1
+            # Determine display interval based on user preference or auto-selection
+            if detail_level == 0:
+                # Auto-select based on forecast duration for optimal readability
+                if hours <= 12:
+                    step = 1  # Every hour for short forecasts
+                elif hours <= 48:
+                    step = 2  # Every 2 hours for 1-2 day forecasts
+                elif hours <= 120:
+                    step = 3  # Every 3 hours for up to 5 days
+                else:
+                    step = 6  # Every 6 hours for long forecasts
+            else:
+                # Use user-specified detail level
+                step = detail_level
+            
+            # Add display interval information
+            if step == 1:
+                interval_desc = "📊 显示频率: 每小时\n\n"
+            else:
+                interval_desc = f"📊 显示频率: 每{step}小时 (如需更详细预报，请设置 detail_level=1)\n\n"
+            
+            forecast += interval_desc
             
             for i in range(0, min(hours, len(hourly["temperature"])), step):
                 time = hourly["temperature"][i]["datetime"]
