@@ -1218,6 +1218,182 @@ async def get_weather_alerts(
 
 
 @mcp.tool()
+async def get_air_quality_station_forecast(
+    lng: float = Field(
+        description="The longitude of the location (-180 to 180)",
+        ge=-180.0,
+        le=180.0
+    ),
+    lat: float = Field(
+        description="The latitude of the location (-90 to 90)",
+        ge=-90.0,
+        le=90.0
+    ),
+    hours: int = Field(
+        description="Number of hours to forecast (1-360)",
+        ge=1,
+        le=360,
+        default=168  # 7 days
+    ),
+) -> str:
+    """Get air quality forecast from the nearest monitoring station including PM2.5, PM10, O3, and other pollutants."""
+    try:
+        token = validate_api_token()
+        logger.info(f"Getting station-based air quality forecast for coordinates: {lng}, {lat} for {hours} hours")
+        
+        async with httpx.AsyncClient() as client:
+            result = await make_request(
+                client,
+                "https://singer.caiyunhub.com/v3/aqi/forecast/station",
+                {
+                    "token": token,
+                    "longitude": lng,
+                    "latitude": lat,
+                    "hours": str(hours)
+                },
+            )
+            
+            if "data" not in result or not result["data"]:
+                return f"❌ 未找到位置 ({lng}, {lat}) 附近的空气质量监测站数据"
+            
+            # Find the nearest station (first one is usually the nearest)
+            stations = result["data"]
+            nearest_station = stations[0]
+            
+            station_id = nearest_station["station_id"]
+            station_lng = nearest_station["longitude"]
+            station_lat = nearest_station["latitude"]
+            forecast_data = nearest_station["data"]
+            
+            # Calculate distance from requested location to station
+            import math
+            def calculate_distance(lat1, lng1, lat2, lng2):
+                """Calculate distance between two coordinates in km"""
+                R = 6371  # Earth's radius in kilometers
+                dlat = math.radians(lat2 - lat1)
+                dlng = math.radians(lng2 - lng1)
+                a = (math.sin(dlat / 2) ** 2 + 
+                     math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+                     math.sin(dlng / 2) ** 2)
+                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                return R * c
+            
+            distance = calculate_distance(lat, lng, station_lat, station_lng)
+            
+            report = f"""🏭 监测站空气质量预报 (未来{hours}小时)
+📍 查询位置: {lng}, {lat}
+🎯 最近监测站: {station_id}
+📍 监测站位置: {station_lng}, {station_lat}
+📏 距离: {distance:.2f}km
+
+"""
+            
+            if len(stations) > 1:
+                report += f"💡 共找到{len(stations)}个监测站，显示最近的监测站数据\n\n"
+            
+            # Group data by days for better readability
+            if hours <= 48:
+                # Show hourly data for short periods
+                report += "⏰ === 逐小时空气质量预报 ===\n\n"
+                step = 1
+            else:
+                # Show every 6 hours for longer periods
+                report += "⏰ === 空气质量预报 (每6小时) ===\n\n"
+                step = 6
+            
+            # Process forecast data
+            for i in range(0, min(len(forecast_data), hours), step):
+                data_point = forecast_data[i]
+                
+                datetime_str = data_point["date"]
+                aqi = data_point["aqi"]
+                pm25 = data_point["pm25"]
+                pm10 = data_point["pm10"]
+                o3 = data_point["o3"]
+                so2 = data_point["so2"]
+                no2 = data_point["no2"]
+                co = data_point["co"]
+                
+                # Get AQI level description
+                level, desc, icon = get_aqi_level_description(aqi)
+                pm25_level, pm25_icon = get_pm25_level_description(pm25)
+                
+                report += f"""⏰ {datetime_str}
+{icon} AQI: {aqi} ({level})
+{pm25_icon} PM2.5: {pm25}μg/m³ ({pm25_level})
+🌫️ PM10: {pm10}μg/m³
+💨 臭氧(O3): {o3}μg/m³
+🌬️ 二氧化氮(NO2): {no2}μg/m³
+☁️ 二氧化硫(SO2): {so2}μg/m³
+💨 一氧化碳(CO): {co}mg/m³
+💡 健康建议: {desc}
+------------------------
+"""
+            
+            # Add trend analysis for longer periods
+            if hours >= 24 and len(forecast_data) > 12:
+                aqi_values = [data["aqi"] for data in forecast_data[:min(len(forecast_data), hours)]]
+                pm25_values = [data["pm25"] for data in forecast_data[:min(len(forecast_data), hours)]]
+                pm10_values = [data["pm10"] for data in forecast_data[:min(len(forecast_data), hours)]]
+                o3_values = [data["o3"] for data in forecast_data[:min(len(forecast_data), hours)]]
+                
+                report += f"\n📈 === 趋势分析 ===\n"
+                
+                # AQI trend
+                aqi_start, aqi_end = aqi_values[0], aqi_values[-1]
+                aqi_change = aqi_end - aqi_start
+                if aqi_change > 10:
+                    trend_desc = "📈 恶化"
+                elif aqi_change < -10:
+                    trend_desc = "📉 改善"
+                else:
+                    trend_desc = "➡️ 稳定"
+                
+                report += f"AQI趋势: {aqi_start}→{aqi_end} ({trend_desc})\n"
+                report += f"平均AQI: {sum(aqi_values)/len(aqi_values):.0f}\n"
+                
+                # Pollutant averages
+                report += f"平均PM2.5: {sum(pm25_values)/len(pm25_values):.0f}μg/m³\n"
+                report += f"平均PM10: {sum(pm10_values)/len(pm10_values):.0f}μg/m³\n"
+                report += f"平均臭氧: {sum(o3_values)/len(o3_values):.0f}μg/m³\n"
+                
+                # Best and worst periods
+                min_aqi = min(aqi_values)
+                max_aqi = max(aqi_values)
+                min_idx = aqi_values.index(min_aqi)
+                max_idx = aqi_values.index(max_aqi)
+                
+                report += f"\n🌟 空气质量最佳时段: {forecast_data[min_idx]['date']} (AQI: {min_aqi})\n"
+                report += f"⚠️ 空气质量最差时段: {forecast_data[max_idx]['date']} (AQI: {max_aqi})\n"
+            
+            # Add health recommendations
+            avg_aqi = sum(data["aqi"] for data in forecast_data[:min(len(forecast_data), hours)]) / min(len(forecast_data), hours)
+            report += f"\n🏥 === 健康建议 ===\n"
+            report += f"预报期间平均AQI: {avg_aqi:.0f}\n"
+            
+            if avg_aqi <= 50:
+                report += "✅ 空气质量优良，适合各类户外活动\n"
+            elif avg_aqi <= 100:
+                report += "⚠️ 空气质量可接受，敏感人群应适当减少长时间户外运动\n"
+            elif avg_aqi <= 150:
+                report += "🚫 轻度污染，建议减少户外活动，敏感人群避免户外运动\n"
+            elif avg_aqi <= 200:
+                report += "🚫 中度污染，建议避免户外运动，外出时佩戴口罩\n"
+            else:
+                report += "🚨 重度污染，建议尽量待在室内，必要时使用空气净化器\n"
+            
+            report += f"\n📊 数据来源: 彩云天气监测站网络\n"
+            report += f"📍 监测站ID: {station_id}\n"
+            report += f"⏰ 数据更新频率: 每小时"
+            
+            return report
+            
+    except Exception as e:
+        logger.error(f"Error getting station air quality forecast: {str(e)}")
+        raise Exception(f"Failed to get station air quality forecast: {str(e)}")
+
+
+@mcp.tool()
 async def get_server_stats() -> str:
     """Get server performance statistics and cache information."""
     try:
