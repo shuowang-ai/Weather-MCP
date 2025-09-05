@@ -211,6 +211,23 @@ async def get_hourly_forecast(
                 config.get_api_url(f"{lng},{lat}/hourly"),
                 {"hourlysteps": str(hours), "lang": config.default_lang},
             )
+            
+            # Also get station data for enhanced PM10 and O3 forecasts
+            station_result = None
+            try:
+                station_result = await make_request(
+                    client,
+                    "https://singer.caiyunhub.com/v3/aqi/forecast/station",
+                    {
+                        "token": token,
+                        "longitude": lng,
+                        "latitude": lat,
+                        "hours": str(hours)
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Station data not available for hourly forecast: {str(e)}")
+            
             hourly = result["result"]["hourly"]
             description = hourly.get("description", f"未来{hours}小时天气预报")
             keypoint = result["result"].get("forecast_keypoint", "")
@@ -219,39 +236,84 @@ async def get_hourly_forecast(
             if keypoint:
                 forecast += f"🎯 关键信息: {keypoint}\n\n"
             
-            # Air quality trend analysis (if available)
+            # Process station data for enhanced air quality info
+            station_hourly_data = {}
+            station_info = ""
+            if station_result and "data" in station_result and station_result["data"]:
+                station_forecast = station_result["data"][0]["data"]  # Use nearest station
+                station_id = station_result["data"][0]["station_id"]
+                station_info = f"💡 PM10和O3数据来自监测站: {station_id}\n"
+                
+                for data_point in station_forecast:
+                    # Use timestamp as key for hourly matching
+                    timestamp = data_point["timestamp"]
+                    station_hourly_data[timestamp] = {
+                        "pm10": data_point["pm10"],
+                        "o3": data_point["o3"],
+                        "pm25": data_point["pm25"],
+                        "aqi": data_point["aqi"],
+                        "no2": data_point["no2"],
+                        "so2": data_point["so2"],
+                        "co": data_point["co"]
+                    }
+
+            # Enhanced air quality trend analysis
             air_quality_trend = ""
+            aqi_values = []
+            pm25_values = []
+            pm10_values = []
+            o3_values = []
+            
+            # Collect trend data from both sources
             if "air_quality" in hourly and "aqi" in hourly["air_quality"]:
-                aqi_values = []
-                pm25_values = []
                 for data in hourly["air_quality"]["aqi"][:min(hours, len(hourly["air_quality"]["aqi"]))]:
                     aqi_values.append(data["value"]["chn"])
                 if "pm25" in hourly["air_quality"]:
                     for data in hourly["air_quality"]["pm25"][:min(hours, len(hourly["air_quality"]["pm25"]))]:
                         pm25_values.append(data["value"])
+            
+            # Collect PM10 and O3 from station data
+            for timestamp, data in station_hourly_data.items():
+                pm10_values.append(data["pm10"])
+                o3_values.append(data["o3"])
                 
-                if len(aqi_values) >= 2:
-                    aqi_start = aqi_values[0]
-                    aqi_end = aqi_values[-1]
-                    aqi_change = aqi_end - aqi_start
-                    
-                    if aqi_change > 10:
-                        trend_desc = "📈 空气质量趋势：恶化"
-                    elif aqi_change < -10:
-                        trend_desc = "📉 空气质量趋势：改善"
-                    else:
-                        trend_desc = "➡️ 空气质量趋势：稳定"
-                    
-                    air_quality_trend = f"{trend_desc} (AQI: {aqi_start}→{aqi_end})\n"
-                    
-                    if pm25_values and len(pm25_values) >= 2:
-                        pm25_change = pm25_values[-1] - pm25_values[0]
-                        air_quality_trend += f"PM2.5变化: {pm25_values[0]}→{pm25_values[-1]}μg/m³\n"
-                    
-                    air_quality_trend += "\n"
+                # Use station AQI and PM25 if available and more accurate
+                if not aqi_values:
+                    aqi_values.append(data["aqi"])
+                if not pm25_values:
+                    pm25_values.append(data["pm25"])
+            
+            if len(aqi_values) >= 2:
+                aqi_start = aqi_values[0]
+                aqi_end = aqi_values[-1]
+                aqi_change = aqi_end - aqi_start
+                
+                if aqi_change > 10:
+                    trend_desc = "📈 空气质量趋势：恶化"
+                elif aqi_change < -10:
+                    trend_desc = "📉 空气质量趋势：改善"
+                else:
+                    trend_desc = "➡️ 空气质量趋势：稳定"
+                
+                air_quality_trend = f"{trend_desc} (AQI: {aqi_start}→{aqi_end})\n"
+                
+                if pm25_values and len(pm25_values) >= 2:
+                    pm25_change = pm25_values[-1] - pm25_values[0]
+                    air_quality_trend += f"PM2.5变化: {pm25_values[0]}→{pm25_values[-1]}μg/m³\n"
+                
+                # Enhanced PM10 and O3 trend info
+                if len(pm10_values) >= 2:
+                    pm10_change = pm10_values[-1] - pm10_values[0]
+                    air_quality_trend += f"PM10变化: {pm10_values[0]}→{pm10_values[-1]}μg/m³\n"
+                
+                if len(o3_values) >= 2:
+                    o3_change = o3_values[-1] - o3_values[0]
+                    air_quality_trend += f"臭氧变化: {o3_values[0]}→{o3_values[-1]}μg/m³\n"
+                
+                air_quality_trend += "\n"
             
             if air_quality_trend:
-                forecast += f"🏭 === 空气质量趋势 ===\n{air_quality_trend}"
+                forecast += f"🏭 === 空气质量趋势 ===\n{station_info}{air_quality_trend}"
             
             # Show every 3 hours for better readability if more than 24 hours
             step = 3 if hours > 24 else 1
@@ -281,9 +343,45 @@ async def get_hourly_forecast(
                 if "apparent_temperature" in hourly and i < len(hourly["apparent_temperature"]):
                     apparent_temp = f"🤔 体感: {hourly['apparent_temperature'][i]['value']}°C\n"
                 
-                # Air quality (if available)
+                # Enhanced Air quality with station data priority
                 air_quality_info = ""
-                if "air_quality" in hourly:
+                
+                # Try to match station data by timestamp first
+                station_match = None
+                if station_hourly_data:
+                    # Convert datetime to timestamp for matching
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+                        timestamp = int(dt.timestamp())
+                        station_match = station_hourly_data.get(timestamp)
+                    except Exception:
+                        pass
+                
+                # Use station data if available, otherwise fallback to regular data
+                if station_match:
+                    # Station data (more accurate for PM10, O3)
+                    aqi = station_match["aqi"]
+                    pm25 = station_match["pm25"]
+                    pm10 = station_match["pm10"]
+                    o3 = station_match["o3"]
+                    no2 = station_match["no2"]
+                    so2 = station_match["so2"]
+                    co = station_match["co"]
+                    
+                    _, _, aqi_icon = get_aqi_level_description(aqi)
+                    _, pm25_icon = get_pm25_level_description(pm25)
+                    
+                    air_quality_info += f"{aqi_icon} AQI: {aqi} [监测站]\n"
+                    air_quality_info += f"{pm25_icon} PM2.5: {pm25}μg/m³ [监测站]\n"
+                    air_quality_info += f"🌫️ PM10: {pm10}μg/m³ [监测站]\n"
+                    air_quality_info += f"💨 臭氧: {o3}μg/m³ [监测站]\n"
+                    air_quality_info += f"🌬️ NO2: {no2}μg/m³ [监测站]\n"
+                    air_quality_info += f"☁️ SO2: {so2}μg/m³ [监测站]\n"
+                    air_quality_info += f"💨 CO: {co}mg/m³ [监测站]\n"
+                    
+                elif "air_quality" in hourly:
+                    # Fallback to regular API data
                     # AQI information
                     if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
                         aqi_data = hourly["air_quality"]["aqi"][i]["value"]
