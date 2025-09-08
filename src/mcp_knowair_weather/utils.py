@@ -66,13 +66,19 @@ def format_precipitation_intensity(intensity: float, data_type: str = "radar", t
     - 0.35~0.48: 大雨/雪
     - >= 0.48: 暴雨/雪
     
-    优化的mm/h分级标准 (逐小时+分钟级):
-    - < 0.1: 无降水
-    - 0.1~0.5: 毛毛雨/雪
-    - 0.5~2.5: 小雨/雪
-    - 2.5~8.0: 中雨/雪
-    - 8.0~20.0: 大雨/雪
-    - >= 20.0: 暴雨/雪
+    官方mm/h分级标准 (逐小时预报):
+    - < 0.0606: 无降水
+    - 0.0606~0.8989: 小雨/雪
+    - 0.8989~2.8700: 中雨/雪
+    - 2.8700~12.8638: 大雨/雪
+    - >= 12.8638: 暴雨/雪
+    
+    官方mm/h分级标准 (分钟级预报):
+    - < 0.08: 无降水
+    - 0.08~3.44: 小雨/雪
+    - 3.44~11.33: 中雨/雪
+    - 11.33~51.30: 大雨/雪
+    - >= 51.30: 暴雨/雪
     """
     precip_type = get_precipitation_type(temperature)
     if data_type == "radar":
@@ -88,19 +94,17 @@ def format_precipitation_intensity(intensity: float, data_type: str = "radar", t
         else:
             return f"{intensity:.3f} (暴{precip_type})"
     elif data_type == "hourly":
-        # 逐小时预报降水量 - 默认metric返回mm/h（与实况/分钟级的雷达强度不同！）
-        if intensity < 0.1:
-            return f"{intensity:.3f}mm/h (无{precip_type})"
-        elif intensity < 0.5:
-            return f"{intensity:.3f}mm/h (毛毛{precip_type})"
-        elif intensity < 2.5:
-            return f"{intensity:.3f}mm/h (小{precip_type})"
-        elif intensity < 8.0:
-            return f"{intensity:.3f}mm/h (中{precip_type})"
-        elif intensity < 20.0:
-            return f"{intensity:.3f}mm/h (大{precip_type})"
+        # 逐小时预报降水量 - 使用官方mm/h分级标准
+        if intensity < 0.0606:
+            return f"{intensity:.4f}mm/h (无{precip_type})"
+        elif intensity < 0.8989:
+            return f"{intensity:.4f}mm/h (小{precip_type})"
+        elif intensity < 2.8700:
+            return f"{intensity:.4f}mm/h (中{precip_type})"
+        elif intensity < 12.8638:
+            return f"{intensity:.4f}mm/h (大{precip_type})"
         else:
-            return f"{intensity:.3f}mm/h (暴{precip_type})"
+            return f"{intensity:.4f}mm/h (暴{precip_type})"
     elif data_type == "hourly_radar":
         # 逐小时预报降水量 - unit=metric:v1时的雷达强度格式
         if intensity < 0.031:
@@ -125,20 +129,31 @@ def format_precipitation_intensity(intensity: float, data_type: str = "radar", t
             return f"{intensity:.3f} (大{precip_type})"
         else:
             return f"{intensity:.3f} (暴{precip_type})"
-    elif data_type == "daily":
-        # 逐日预报降水量 - 默认metric返回mm/h（与实况/分钟级的雷达强度不同！）
-        if intensity < 0.1:
-            return f"{intensity:.3f}mm/h (无{precip_type})"
-        elif intensity < 0.5:
-            return f"{intensity:.3f}mm/h (毛毛{precip_type})"
-        elif intensity < 2.5:
-            return f"{intensity:.3f}mm/h (小{precip_type})"
-        elif intensity < 8.0:
-            return f"{intensity:.3f}mm/h (中{precip_type})"
-        elif intensity < 20.0:
-            return f"{intensity:.3f}mm/h (大{precip_type})"
+    elif data_type == "minutely_mm":
+        # 分钟级预报 - unit=metric:v2时的mm/h格式，使用官方分钟级mm/h分级标准
+        if intensity < 0.08:
+            return f"{intensity:.2f}mm/h (无{precip_type})"
+        elif intensity < 3.44:
+            return f"{intensity:.2f}mm/h (小{precip_type})"
+        elif intensity < 11.33:
+            return f"{intensity:.2f}mm/h (中{precip_type})"
+        elif intensity < 51.30:
+            return f"{intensity:.2f}mm/h (大{precip_type})"
         else:
-            return f"{intensity:.3f}mm/h (暴{precip_type})"
+            return f"{intensity:.2f}mm/h (暴{precip_type})"
+    elif data_type == "daily":
+        # 逐日预报降水量 - 注意：应使用avg*2再用逐小时阈值判断
+        # 这里假设传入的intensity已经是处理过的值
+        if intensity < 0.0606:
+            return f"{intensity:.4f}mm/h (无{precip_type})"
+        elif intensity < 0.8989:
+            return f"{intensity:.4f}mm/h (小{precip_type})"
+        elif intensity < 2.8700:
+            return f"{intensity:.4f}mm/h (中{precip_type})"
+        elif intensity < 12.8638:
+            return f"{intensity:.4f}mm/h (大{precip_type})"
+        else:
+            return f"{intensity:.4f}mm/h (暴{precip_type})"
     elif data_type == "daily_radar":
         # 逐日预报降水量 - unit=metric:v1时的雷达强度格式
         if intensity < 0.031:
