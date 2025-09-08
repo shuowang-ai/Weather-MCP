@@ -38,30 +38,28 @@ def translate_weather_phenomenon(skycon: str) -> str:
 def format_precipitation_intensity(intensity: float, data_type: str = "radar") -> str:
     """Format precipitation intensity with proper description based on data type.
     
-    使用API官方降水强度分级标准：
-    雷达降水强度 (0-1 范围):
+    综合优化降水强度分级标准：
+    - 融合API官方、中国气象标准和实际体感
+    - 雷达数据保持API原始标准以确保兼容性
+    - mm/h数据采用优化标准，更符合实际感受
+    
+    雷达降水强度 (0-1 范围) - API官方标准:
     - < 0.031: 无雨/雪
     - 0.031~0.25: 小雨/雪  
     - 0.25~0.35: 中雨/雪
     - 0.35~0.48: 大雨/雪
     - >= 0.48: 暴雨/雪
     
-    逐小时降水量 (mm/h):
-    - < 0.0606: 无雨/雪
-    - 0.0606~0.8989: 小雨/雪
-    - 0.8989~2.87: 中雨/雪  
-    - 2.87~12.8638: 大雨/雪
-    - >= 12.8638: 暴雨/雪
-    
-    分钟级降水量 (mm/h):
-    - < 0.08: 无雨/雪
-    - 0.08~3.44: 小雨/雪
-    - 3.44~11.33: 中雨/雪
-    - 11.33~51.30: 大雨/雪
-    - >= 51.30: 暴雨/雪
+    优化的mm/h分级标准 (逐小时+分钟级):
+    - < 0.1: 无雨/雪
+    - 0.1~0.5: 毛毛雨/雪
+    - 0.5~2.5: 小雨/雪
+    - 2.5~8.0: 中雨/雪
+    - 8.0~20.0: 大雨/雪
+    - >= 20.0: 暴雨/雪
     """
     if data_type == "radar":
-        # 雷达降水强度 (0-1 范围) - API官方标准
+        # 雷达降水强度 (0-1 范围) - 保持API官方标准以确保兼容性
         if intensity < 0.031:
             return f"{intensity:.3f} (无雨/雪)"
         elif intensity < 0.25:
@@ -73,26 +71,30 @@ def format_precipitation_intensity(intensity: float, data_type: str = "radar") -
         else:
             return f"{intensity:.3f} (暴雨/雪)"
     elif data_type == "hourly":
-        # 逐小时降水量 mm/h - API官方标准
-        if intensity < 0.0606:
+        # 逐小时降水量 mm/h - 使用综合优化标准
+        if intensity < 0.1:
             return f"{intensity:.3f}mm/h (无雨/雪)"
-        elif intensity < 0.8989:
+        elif intensity < 0.5:
+            return f"{intensity:.3f}mm/h (毛毛雨/雪)"
+        elif intensity < 2.5:
             return f"{intensity:.3f}mm/h (小雨/雪)"
-        elif intensity < 2.87:
+        elif intensity < 8.0:
             return f"{intensity:.3f}mm/h (中雨/雪)"
-        elif intensity < 12.8638:
+        elif intensity < 20.0:
             return f"{intensity:.3f}mm/h (大雨/雪)"
         else:
             return f"{intensity:.3f}mm/h (暴雨/雪)"
     elif data_type == "minutely":
-        # 分钟级降水量 mm/h - API官方标准
-        if intensity < 0.08:
+        # 分钟级降水量 mm/h - 使用综合优化标准
+        if intensity < 0.1:
             return f"{intensity:.3f}mm/h (无雨/雪)"
-        elif intensity < 3.44:
+        elif intensity < 0.5:
+            return f"{intensity:.3f}mm/h (毛毛雨/雪)"
+        elif intensity < 2.5:
             return f"{intensity:.3f}mm/h (小雨/雪)"
-        elif intensity < 11.33:
+        elif intensity < 8.0:
             return f"{intensity:.3f}mm/h (中雨/雪)"
-        elif intensity < 51.30:
+        elif intensity < 20.0:
             return f"{intensity:.3f}mm/h (大雨/雪)"
         else:
             return f"{intensity:.3f}mm/h (暴雨/雪)"
