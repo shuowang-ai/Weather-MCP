@@ -197,7 +197,7 @@ async def get_hourly_forecast(
         description="Number of hours to forecast (1-360)",
         ge=1,
         le=360,
-        default=24
+        default=360  # 15 days for comprehensive air quality forecast
     ),
     detail_level: int = Field(
         description="Detail level: 0=auto-select, 1=every hour, 2=every 2 hours, 3=every 3 hours, etc. (0-6)",
@@ -218,6 +218,11 @@ async def get_hourly_forecast(
         token = validate_api_token()
         
         # Handle potential FastMCP parameter issue
+        if hasattr(hours, 'default'):
+            hours = hours.default
+        elif not isinstance(hours, int):
+            hours = 360  # fallback to 15 days
+            
         if hasattr(detail_level, 'default'):
             detail_level = detail_level.default
         elif not isinstance(detail_level, int):
@@ -420,30 +425,40 @@ async def get_hourly_forecast(
                     air_quality_info += f"☁️ SO2: {so2}μg/m³ [监测站]\n"
                     air_quality_info += f"💨 CO: {co}mg/m³ [监测站]\n"
                     
-                elif "air_quality" in hourly:
-                    # Fallback to regular API data
-                    # AQI information
-                    if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
-                        aqi_data = hourly["air_quality"]["aqi"][i]["value"]
-                        chn_aqi = aqi_data["chn"]
-                        usa_aqi = aqi_data.get("usa", "N/A")
-                        _, _, aqi_icon = get_aqi_level_description(chn_aqi)
-                        air_quality_info += f"{aqi_icon} AQI: {chn_aqi} (美标:{usa_aqi})\n"
+                else:
+                    # Fallback to regular API data or estimates when station data unavailable
+                    api_has_data = False
                     
-                    # PM2.5 information
-                    if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
-                        pm25 = hourly["air_quality"]["pm25"][i]["value"]
-                        _, pm25_icon = get_pm25_level_description(pm25)
-                        air_quality_info += f"{pm25_icon} PM2.5: {pm25}μg/m³\n"
+                    if "air_quality" in hourly:
+                        # AQI information
+                        if "aqi" in hourly["air_quality"] and i < len(hourly["air_quality"]["aqi"]):
+                            aqi_data = hourly["air_quality"]["aqi"][i]["value"]
+                            chn_aqi = aqi_data["chn"]
+                            usa_aqi = aqi_data.get("usa", "N/A")
+                            _, _, aqi_icon = get_aqi_level_description(chn_aqi)
+                            air_quality_info += f"{aqi_icon} AQI: {chn_aqi} (美标:{usa_aqi})\n"
+                            api_has_data = True
+                        
+                        # PM2.5 information
+                        if "pm25" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm25"]):
+                            pm25 = hourly["air_quality"]["pm25"][i]["value"]
+                            _, pm25_icon = get_pm25_level_description(pm25)
+                            air_quality_info += f"{pm25_icon} PM2.5: {pm25}μg/m³\n"
+                            api_has_data = True
+                        
+                        # Additional pollutants (usually not available in regular API)
+                        if "pm10" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm10"]):
+                            pm10 = hourly["air_quality"]["pm10"][i]["value"]
+                            air_quality_info += f"🌫️ PM10: {pm10}μg/m³\n"
+                        
+                        if "o3" in hourly["air_quality"] and i < len(hourly["air_quality"]["o3"]):
+                            o3 = hourly["air_quality"]["o3"][i]["value"]
+                            air_quality_info += f"💨 臭氧: {o3}μg/m³\n"
                     
-                    # Additional pollutants
-                    if "pm10" in hourly["air_quality"] and i < len(hourly["air_quality"]["pm10"]):
-                        pm10 = hourly["air_quality"]["pm10"][i]["value"]
-                        air_quality_info += f"🌫️ PM10: {pm10}μg/m³\n"
-                    
-                    if "o3" in hourly["air_quality"] and i < len(hourly["air_quality"]["o3"]):
-                        o3 = hourly["air_quality"]["o3"][i]["value"]
-                        air_quality_info += f"💨 臭氧: {o3}μg/m³\n"
+                    # When no air quality data available, provide informative message
+                    if not api_has_data:
+                        air_quality_info += f"🏭 空气质量数据: 超出监测站覆盖范围（>5天）\n"
+                        air_quality_info += f"📊 建议: 请查询5天内预报获取完整空气质量数据\n"
                     
                     if "no2" in hourly["air_quality"] and i < len(hourly["air_quality"]["no2"]):
                         no2 = hourly["air_quality"]["no2"][i]["value"]
