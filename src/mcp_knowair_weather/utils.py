@@ -35,105 +35,122 @@ def translate_weather_phenomenon(skycon: str) -> str:
     return WEATHER_PHENOMENA.get(skycon, skycon)
 
 
-def format_precipitation_intensity(intensity: float, data_type: str = "radar") -> str:
+def get_precipitation_type(temperature: float = None) -> str:
+    """根据温度判断降水类型（雨或雪）"""
+    if temperature is None:
+        return "雨/雪"  # 温度未知时保持原样
+    elif temperature > 0:
+        return "雨"
+    else:
+        return "雪"
+
+
+def format_precipitation_intensity(intensity: float, data_type: str = "radar", temperature: float = None) -> str:
     """Format precipitation intensity with proper description based on data type.
+    
+    Args:
+        intensity: 降水强度值
+        data_type: 数据类型（radar, hourly, minutely, daily等）
+        temperature: 温度（摄氏度），用于判断雨雪类型，>0为雨，≤0为雪
     
     综合优化降水强度分级标准：
     - 融合API官方、中国气象标准和实际体感
     - 雷达数据保持API原始标准以确保兼容性
     - mm/h数据采用优化标准，更符合实际感受
+    - 根据温度自动判断雨雪类型
     
     雷达降水强度 (0-1 范围) - API官方标准:
-    - < 0.031: 无雨/雪
+    - < 0.031: 无降水
     - 0.031~0.25: 小雨/雪  
     - 0.25~0.35: 中雨/雪
     - 0.35~0.48: 大雨/雪
     - >= 0.48: 暴雨/雪
     
     优化的mm/h分级标准 (逐小时+分钟级):
-    - < 0.1: 无雨/雪
+    - < 0.1: 无降水
     - 0.1~0.5: 毛毛雨/雪
     - 0.5~2.5: 小雨/雪
     - 2.5~8.0: 中雨/雪
     - 8.0~20.0: 大雨/雪
     - >= 20.0: 暴雨/雪
     """
+    precip_type = get_precipitation_type(temperature)
     if data_type == "radar":
         # 雷达降水强度 (0-1 范围) - 保持API官方标准以确保兼容性
         if intensity < 0.031:
-            return f"{intensity:.3f} (无雨/雪)"
+            return f"{intensity:.3f} (无{precip_type})"
         elif intensity < 0.25:
-            return f"{intensity:.3f} (小雨/雪)"
+            return f"{intensity:.3f} (小{precip_type})"
         elif intensity < 0.35:
-            return f"{intensity:.3f} (中雨/雪)"
+            return f"{intensity:.3f} (中{precip_type})"
         elif intensity < 0.48:
-            return f"{intensity:.3f} (大雨/雪)"
+            return f"{intensity:.3f} (大{precip_type})"
         else:
-            return f"{intensity:.3f} (暴雨/雪)"
+            return f"{intensity:.3f} (暴{precip_type})"
     elif data_type == "hourly":
         # 逐小时预报降水量 - 默认metric返回mm/h（与实况/分钟级的雷达强度不同！）
         if intensity < 0.1:
-            return f"{intensity:.3f}mm/h (无雨/雪)"
+            return f"{intensity:.3f}mm/h (无{precip_type})"
         elif intensity < 0.5:
-            return f"{intensity:.3f}mm/h (毛毛雨/雪)"
+            return f"{intensity:.3f}mm/h (毛毛{precip_type})"
         elif intensity < 2.5:
-            return f"{intensity:.3f}mm/h (小雨/雪)"
+            return f"{intensity:.3f}mm/h (小{precip_type})"
         elif intensity < 8.0:
-            return f"{intensity:.3f}mm/h (中雨/雪)"
+            return f"{intensity:.3f}mm/h (中{precip_type})"
         elif intensity < 20.0:
-            return f"{intensity:.3f}mm/h (大雨/雪)"
+            return f"{intensity:.3f}mm/h (大{precip_type})"
         else:
-            return f"{intensity:.3f}mm/h (暴雨/雪)"
+            return f"{intensity:.3f}mm/h (暴{precip_type})"
     elif data_type == "hourly_radar":
         # 逐小时预报降水量 - unit=metric:v1时的雷达强度格式
         if intensity < 0.031:
-            return f"{intensity:.3f} (无雨/雪)"
+            return f"{intensity:.3f} (无{precip_type})"
         elif intensity < 0.25:
-            return f"{intensity:.3f} (小雨/雪)"
+            return f"{intensity:.3f} (小{precip_type})"
         elif intensity < 0.35:
-            return f"{intensity:.3f} (中雨/雪)"
+            return f"{intensity:.3f} (中{precip_type})"
         elif intensity < 0.48:
-            return f"{intensity:.3f} (大雨/雪)"
+            return f"{intensity:.3f} (大{precip_type})"
         else:
-            return f"{intensity:.3f} (暴雨/雪)"
+            return f"{intensity:.3f} (暴{precip_type})"
     elif data_type == "minutely":
         # 分钟级降水短临预报 - 默认返回雷达降水强度（0-1），使用API官方标准
         if intensity < 0.031:
-            return f"{intensity:.3f} (无雨/雪)"
+            return f"{intensity:.3f} (无{precip_type})"
         elif intensity < 0.25:
-            return f"{intensity:.3f} (小雨/雪)"
+            return f"{intensity:.3f} (小{precip_type})"
         elif intensity < 0.35:
-            return f"{intensity:.3f} (中雨/雪)"
+            return f"{intensity:.3f} (中{precip_type})"
         elif intensity < 0.48:
-            return f"{intensity:.3f} (大雨/雪)"
+            return f"{intensity:.3f} (大{precip_type})"
         else:
-            return f"{intensity:.3f} (暴雨/雪)"
+            return f"{intensity:.3f} (暴{precip_type})"
     elif data_type == "daily":
         # 逐日预报降水量 - 默认metric返回mm/h（与实况/分钟级的雷达强度不同！）
         if intensity < 0.1:
-            return f"{intensity:.3f}mm/h (无雨/雪)"
+            return f"{intensity:.3f}mm/h (无{precip_type})"
         elif intensity < 0.5:
-            return f"{intensity:.3f}mm/h (毛毛雨/雪)"
+            return f"{intensity:.3f}mm/h (毛毛{precip_type})"
         elif intensity < 2.5:
-            return f"{intensity:.3f}mm/h (小雨/雪)"
+            return f"{intensity:.3f}mm/h (小{precip_type})"
         elif intensity < 8.0:
-            return f"{intensity:.3f}mm/h (中雨/雪)"
+            return f"{intensity:.3f}mm/h (中{precip_type})"
         elif intensity < 20.0:
-            return f"{intensity:.3f}mm/h (大雨/雪)"
+            return f"{intensity:.3f}mm/h (大{precip_type})"
         else:
-            return f"{intensity:.3f}mm/h (暴雨/雪)"
+            return f"{intensity:.3f}mm/h (暴{precip_type})"
     elif data_type == "daily_radar":
         # 逐日预报降水量 - unit=metric:v1时的雷达强度格式
         if intensity < 0.031:
-            return f"{intensity:.3f} (无雨/雪)"
+            return f"{intensity:.3f} (无{precip_type})"
         elif intensity < 0.25:
-            return f"{intensity:.3f} (小雨/雪)"
+            return f"{intensity:.3f} (小{precip_type})"
         elif intensity < 0.35:
-            return f"{intensity:.3f} (中雨/雪)"
+            return f"{intensity:.3f} (中{precip_type})"
         elif intensity < 0.48:
-            return f"{intensity:.3f} (大雨/雪)"
+            return f"{intensity:.3f} (大{precip_type})"
         else:
-            return f"{intensity:.3f} (暴雨/雪)"
+            return f"{intensity:.3f} (暴{precip_type})"
     else:
         return f"{intensity:.3f}"
 

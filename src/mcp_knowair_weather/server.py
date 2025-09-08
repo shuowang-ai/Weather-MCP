@@ -117,7 +117,7 @@ async def get_realtime_weather(
             
             # Format weather report
             weather_desc = translate_weather_phenomenon(rt["skycon"])
-            precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"], "radar")
+            precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"], "radar", rt["temperature"])
             
             report = f"""🌤️ 实时天气数据:
 📍 位置: {lng}, {lat}
@@ -366,7 +366,7 @@ async def get_hourly_forecast(
                 # Precipitation data
                 rain_prob = safe_precipitation_probability(hourly["precipitation"][i]["probability"])
                 precip_value = hourly["precipitation"][i].get("value", 0)
-                precip_desc = format_precipitation_intensity(precip_value, "hourly")
+                precip_desc = format_precipitation_intensity(precip_value, "hourly", temp)
                 
                 # Wind data
                 wind_speed = hourly["wind"][i]["speed"]
@@ -839,6 +839,10 @@ async def get_minutely_precipitation(
                 return f"⚠️  分钟级降水数据不可用 (位置: {lng}, {lat})\n此功能主要适用于中国主要城市。"
             
             minutely = result["result"]["minutely"]
+            # Get current temperature for rain/snow determination
+            current_temp = None
+            if "realtime" in result["result"]:
+                current_temp = result["result"]["realtime"].get("temperature")
             
             # Get summary and datasource
             description = minutely.get("description", "暂无描述")
@@ -858,7 +862,7 @@ async def get_minutely_precipitation(
                 for i in range(0, min(60, len(precipitation_data)), 5):
                     time_offset = i
                     intensity = precipitation_data[i] if i < len(precipitation_data) else 0
-                    intensity_desc = format_precipitation_intensity(intensity, "minutely")
+                    intensity_desc = format_precipitation_intensity(intensity, "minutely", current_temp)
                     forecast += f"T+{time_offset:2d}分钟: {intensity_desc}\n"
             
             # Show 2-hour precipitation probability
@@ -924,7 +928,7 @@ async def get_comprehensive_weather(
             if "realtime" in weather_data:
                 rt = weather_data["realtime"]
                 weather_desc = translate_weather_phenomenon(rt["skycon"])
-                precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"])
+                precip_intensity = format_precipitation_intensity(rt["precipitation"]["local"]["intensity"], "radar", rt["temperature"])
                 
                 report += f"""🌤️  === 实时天气 ===
 🌡️  温度: {rt["temperature"]}°C
