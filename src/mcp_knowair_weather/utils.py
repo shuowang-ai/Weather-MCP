@@ -36,9 +36,32 @@ def translate_weather_phenomenon(skycon: str) -> str:
 
 
 def format_precipitation_intensity(intensity: float, data_type: str = "radar") -> str:
-    """Format precipitation intensity with proper description based on data type."""
+    """Format precipitation intensity with proper description based on data type.
+    
+    使用API官方降水强度分级标准：
+    雷达降水强度 (0-1 范围):
+    - < 0.031: 无雨/雪
+    - 0.031~0.25: 小雨/雪  
+    - 0.25~0.35: 中雨/雪
+    - 0.35~0.48: 大雨/雪
+    - >= 0.48: 暴雨/雪
+    
+    逐小时降水量 (mm/h):
+    - < 0.0606: 无雨/雪
+    - 0.0606~0.8989: 小雨/雪
+    - 0.8989~2.87: 中雨/雪  
+    - 2.87~12.8638: 大雨/雪
+    - >= 12.8638: 暴雨/雪
+    
+    分钟级降水量 (mm/h):
+    - < 0.08: 无雨/雪
+    - 0.08~3.44: 小雨/雪
+    - 3.44~11.33: 中雨/雪
+    - 11.33~51.30: 大雨/雪
+    - >= 51.30: 暴雨/雪
+    """
     if data_type == "radar":
-        # 雷达降水强度 (0-1 范围)
+        # 雷达降水强度 (0-1 范围) - API官方标准
         if intensity < 0.031:
             return f"{intensity:.3f} (无雨/雪)"
         elif intensity < 0.25:
@@ -50,29 +73,29 @@ def format_precipitation_intensity(intensity: float, data_type: str = "radar") -
         else:
             return f"{intensity:.3f} (暴雨/雪)"
     elif data_type == "hourly":
-        # 逐小时降水量 mm/h
+        # 逐小时降水量 mm/h - API官方标准
         if intensity < 0.0606:
-            return f"{intensity:.2f}mm/h (无雨/雪)"
+            return f"{intensity:.3f}mm/h (无雨/雪)"
         elif intensity < 0.8989:
-            return f"{intensity:.2f}mm/h (小雨/雪)"
+            return f"{intensity:.3f}mm/h (小雨/雪)"
         elif intensity < 2.87:
-            return f"{intensity:.2f}mm/h (中雨/雪)"
+            return f"{intensity:.3f}mm/h (中雨/雪)"
         elif intensity < 12.8638:
-            return f"{intensity:.2f}mm/h (大雨/雪)"
+            return f"{intensity:.3f}mm/h (大雨/雪)"
         else:
-            return f"{intensity:.2f}mm/h (暴雨/雪)"
+            return f"{intensity:.3f}mm/h (暴雨/雪)"
     elif data_type == "minutely":
-        # 分钟级降水量 mm/h
+        # 分钟级降水量 mm/h - API官方标准
         if intensity < 0.08:
-            return f"{intensity:.2f}mm/h (无雨/雪)"
+            return f"{intensity:.3f}mm/h (无雨/雪)"
         elif intensity < 3.44:
-            return f"{intensity:.2f}mm/h (小雨/雪)"
+            return f"{intensity:.3f}mm/h (小雨/雪)"
         elif intensity < 11.33:
-            return f"{intensity:.2f}mm/h (中雨/雪)"
+            return f"{intensity:.3f}mm/h (中雨/雪)"
         elif intensity < 51.30:
-            return f"{intensity:.2f}mm/h (大雨/雪)"
+            return f"{intensity:.3f}mm/h (大雨/雪)"
         else:
-            return f"{intensity:.2f}mm/h (暴雨/雪)"
+            return f"{intensity:.3f}mm/h (暴雨/雪)"
     else:
         return f"{intensity:.3f}"
 
