@@ -2,7 +2,8 @@
 
 import math
 import httpx
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Union
+from datetime import datetime, timezone, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -447,3 +448,103 @@ def process_station_daily_data(station_result: Dict[str, Any]) -> Tuple[Dict[str
             station_daily_data[day_key]["aqi_values"].append(data_point["aqi"])
     
     return station_daily_data, station_info
+
+
+def convert_utc_to_china_time(utc_datetime_str: str) -> str:
+    """
+    Convert UTC datetime string to China Standard Time (UTC+8).
+    
+    Args:
+        utc_datetime_str: UTC datetime string in ISO format
+        
+    Returns:
+        China time string in format "YYYY-MM-DD HH:MM+08:00"
+    """
+    try:
+        # Parse UTC datetime string
+        if utc_datetime_str.endswith('Z'):
+            # Replace Z with +00:00 for proper parsing
+            utc_datetime_str = utc_datetime_str.replace('Z', '+00:00')
+        elif not ('+' in utc_datetime_str or utc_datetime_str.endswith('Z')):
+            # Assume UTC if no timezone info
+            utc_datetime_str += '+00:00'
+            
+        dt_utc = datetime.fromisoformat(utc_datetime_str)
+        
+        # Convert to China Standard Time (UTC+8)
+        china_tz = timezone(timedelta(hours=8))
+        dt_china = dt_utc.astimezone(china_tz)
+        
+        # Format as YYYY-MM-DD HH:MM+08:00
+        return dt_china.strftime('%Y-%m-%d %H:%M+08:00')
+        
+    except (ValueError, TypeError) as e:
+        # Fallback: return original string if conversion fails
+        logger.warning(f"Failed to convert UTC time '{utc_datetime_str}': {e}")
+        return utc_datetime_str
+
+
+def utc_timestamp_to_china_time(timestamp: int) -> str:
+    """
+    Convert UTC timestamp to China Standard Time string.
+    
+    Args:
+        timestamp: UTC timestamp (seconds since epoch)
+        
+    Returns:
+        China time string in format "YYYY-MM-DD HH:MM+08:00"
+    """
+    try:
+        # Create datetime from timestamp (assumes UTC)
+        dt_utc = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        
+        # Convert to China Standard Time (UTC+8)
+        china_tz = timezone(timedelta(hours=8))
+        dt_china = dt_utc.astimezone(china_tz)
+        
+        # Format as YYYY-MM-DD HH:MM+08:00
+        return dt_china.strftime('%Y-%m-%d %H:%M+08:00')
+        
+    except (ValueError, TypeError, OSError) as e:
+        # Fallback: return timestamp as string if conversion fails
+        logger.warning(f"Failed to convert timestamp '{timestamp}': {e}")
+        return str(timestamp)
+
+
+def is_china_location(lng: float, lat: float) -> bool:
+    """
+    Determine if coordinates are within China's approximate boundaries.
+    
+    Args:
+        lng: Longitude
+        lat: Latitude
+        
+    Returns:
+        True if coordinates are likely in China
+    """
+    # Approximate boundaries of China (including Taiwan, Hong Kong, Macau)
+    # Longitude: 73°E to 135°E
+    # Latitude: 18°N to 54°N
+    return 73 <= lng <= 135 and 18 <= lat <= 54
+
+
+def convert_station_timestamp_for_matching(station_timestamp: int, lng: float, lat: float) -> int:
+    """
+    Convert station UTC timestamp for proper matching with API datetime strings.
+    For China locations, API datetimes are in local time (UTC+8).
+    
+    Args:
+        station_timestamp: UTC timestamp from station data
+        lng: Longitude to determine if in China
+        lat: Latitude to determine if in China
+        
+    Returns:
+        Adjusted timestamp for matching
+    """
+    if is_china_location(lng, lat):
+        # For China locations, API returns local time (UTC+8)
+        # So we need to add 8 hours to UTC timestamp for matching
+        return station_timestamp + (8 * 3600)
+    else:
+        # For non-China locations, assume timestamps match directly
+        return station_timestamp

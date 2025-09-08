@@ -15,7 +15,11 @@ from .utils import (
     get_life_index_description,
     get_aqi_level_description,
     get_pm25_level_description,
-    safe_precipitation_probability
+    safe_precipitation_probability,
+    convert_utc_to_china_time,
+    utc_timestamp_to_china_time,
+    is_china_location,
+    convert_station_timestamp_for_matching
 )
 
 # Configure logging
@@ -270,16 +274,18 @@ async def get_hourly_forecast(
                 station_info = f"💡 PM10和O3数据来自监测站: {station_id}\n"
                 
                 for data_point in station_forecast:
-                    # Use timestamp as key for hourly matching
-                    timestamp = data_point["timestamp"]
-                    station_hourly_data[timestamp] = {
+                    # Convert UTC timestamp for proper matching with API datetime
+                    utc_timestamp = data_point["timestamp"]
+                    adjusted_timestamp = convert_station_timestamp_for_matching(utc_timestamp, lng, lat)
+                    station_hourly_data[adjusted_timestamp] = {
                         "pm10": data_point["pm10"],
                         "o3": data_point["o3"],
                         "pm25": data_point["pm25"],
                         "aqi": data_point["aqi"],
                         "no2": data_point["no2"],
                         "so2": data_point["so2"],
-                        "co": data_point["co"]
+                        "co": data_point["co"],
+                        "original_utc_time": utc_timestamp_to_china_time(utc_timestamp)  # For display
                     }
 
             # Enhanced air quality trend analysis
@@ -1398,7 +1404,12 @@ async def get_air_quality_station_forecast(
             for i in range(0, min(len(forecast_data), hours), step):
                 data_point = forecast_data[i]
                 
-                datetime_str = data_point["date"]
+                # Convert UTC time to China time for display
+                utc_datetime_str = data_point["date"]
+                if is_china_location(lng, lat):
+                    datetime_str = convert_utc_to_china_time(utc_datetime_str)
+                else:
+                    datetime_str = utc_datetime_str
                 aqi = data_point["aqi"]
                 pm25 = data_point["pm25"]
                 pm10 = data_point["pm10"]
